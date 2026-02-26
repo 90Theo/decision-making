@@ -7,12 +7,20 @@ Created on Sun Nov 16 13:14:45 2025
 
 def plot_HVAC_results(HVAC_results):
     import matplotlib.pyplot as plt
-    T = 18
     
+    Temp_r1 = HVAC_results['Temp_r1']
+    Temp_r2 = HVAC_results['Temp_r2']
+    h_r1 = HVAC_results['h_r1']
+    h_r2 = HVAC_results['h_r2']
+    v = HVAC_results['v']
+    Hum = HVAC_results['Hum']
+    price = HVAC_results['price']
+    Occ_r1 = HVAC_results['Occ_r1']
+    Occ_r2 = HVAC_results['Occ_r2']
+    
+    T = range(len(Temp_r1))
     
     fig, axes = plt.subplots(4, 1, figsize=(12, 14), sharex=True)
-
-    ## Temp_r1, Temp_r2, etc are imported from HVAC_results
 
     # Room Temperatures
     axes[0].plot(T, Temp_r1, label='Room 1 Temp', marker='o')
@@ -26,7 +34,7 @@ def plot_HVAC_results(HVAC_results):
     
     # Heater consumption
     axes[1].bar(T, h_r1, width=0.4, label='Room 1 Heater', alpha=0.7)
-    axes[1].bar(T, h_r2, width=0.4, bottom=h_r1, label='Room 2 Heater', alpha=0.7)
+    axes[1].bar(T, h_r2, width=0.4, label='Room 2 Heater', alpha=0.7)
     axes[1].set_ylabel("Heater Power (kW)")
     axes[1].set_title("Heater Consumption")
     axes[1].legend()
