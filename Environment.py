@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 DIR = Path(__file__).parent
+np.random.seed(20) # To be able to compare different runs, comment out if you want true randomness
 FIXED_DATA = get_fixed_data()
 DUMMY_POLICY = "dummy_policy_20"
 
@@ -262,4 +263,5 @@ def main():
     print(f"Average daily price: {avg_daily_price:.2f}")
     print(f"It took: {time.time()-start_time:.2f} seconds")
 
-main()
+if __name__ == "__main__":
+    main()

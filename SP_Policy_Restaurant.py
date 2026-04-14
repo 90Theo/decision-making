@@ -264,7 +264,7 @@ def select_action(state):
     L = 3
     if remaining < L:
         L = remaining
-    nodes, scenarios = generate_scenario_tree(state, L)
+    nodes, scenarios = generate_scenario_tree(state, L, branching=3)
     hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios)
     
     HereAndNowActions = {
