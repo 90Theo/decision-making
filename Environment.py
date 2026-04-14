@@ -213,7 +213,7 @@ def evaluate_daily_performance(policy_file, price, occupancy1, occupancy2, initi
         results['Occ_r2'].append(state['Occ2'])
         results['cost'].append(state['price_t'] * (decision['HeatPowerRoom1'] + decision['HeatPowerRoom2'] + decision['VentilationON'] * FIXED_DATA["ventilation_power"]))
         
-        next_state = apply_dynamics(state, decision, price, occupancy1, occupancy2)
+        next_state = apply_dynamics(state, decision, occupancy1, occupancy2, price)
         state = next_state
     results['cost_total'] = sum(results['cost'])
     return results
@@ -251,13 +251,15 @@ def evaluate_performance(policy_file="dummy_policy_20.py", days=100, file_price_
 
 
 def main():
+    start_time = time.time()
     policy_file = "SP_Policy_Restaurant" # TODO replace with your policy file
     results = evaluate_performance(policy_file)
     plot_HVAC_results(results[0]) 
     plt.tight_layout()
-    plt.show()
+    #plt.show()
     print("\nThe results are:")
     avg_daily_price = sum(day_result["cost_total"] for day_result in results) / len(results)
     print(f"Average daily price: {avg_daily_price:.2f}")
+    print(f"It took: {time.time()-start_time:.2f} seconds")
 
 main()
