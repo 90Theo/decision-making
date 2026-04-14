@@ -1,4 +1,4 @@
-from v2_SystemCharacteristics import get_fixed_data
+from SystemCharacteristics import get_fixed_data
 import pandas as pd
 import importlib
 import time
@@ -251,10 +251,13 @@ def evaluate_performance(policy_file="dummy_policy_20.py", days=100, file_price_
 
 
 def main():
-    policy_file = "dummy_policy_20" # TODO replace with your policy file
+    policy_file = "SP_Policy_Restaurant" # TODO replace with your policy file
     results = evaluate_performance(policy_file)
     plot_HVAC_results(results[0]) 
     plt.tight_layout()
     plt.show()
+    print("\nThe results are:")
+    avg_daily_price = sum(day_result["cost_total"] for day_result in results) / len(results)
+    print(f"Average daily price: {avg_daily_price:.2f}")
 
 main()
