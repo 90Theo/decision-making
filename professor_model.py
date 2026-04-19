@@ -1,8 +1,14 @@
 import pyomo.environ as pyo
+from SystemCharacteristics import get_fixed_data
+from pathlib import Path
+from Environment import load_data
 
+FIXED_DATA = get_fixed_data()
+DIR = Path(__file__).parent
 
-def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data, num_t):
+def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     
+    num_t = data['num_timeslots']
     model = pyo.ConcreteModel()
     model.T = pyo.RangeSet(0, num_t - 1)
     model.R = pyo.Set(initialize=['r1', 'r2'])
@@ -52,7 +58,7 @@ def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data, num_t):
 
     # Objective Function
     def obj_rule(m):
-        return sum(model.lambda_e[t] * (model.P_vent * model.v[t] + sum(model.p[r, t] for r in model.R)) for t in model.T)
+        return sum(m.lambda_e[t] * (m.P_vent * m.v[t] + sum(m.p[r, t] for r in m.R)) for t in m.T)
     model.obj = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
     # Constraints
@@ -129,20 +135,20 @@ def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data, num_t):
 
     # Ventilation Startup & Min Up-time
     def vent_start1(m, t):
-        if t == 0: return pyo.Constraint.Skip
+        if t == 0: return m.s[t] >= m.v[t]
         return m.s[t] >= m.v[t] - m.v[t-1]
     def vent_start2(m, t):
         return m.s[t] <= m.v[t]
     def vent_start3(m, t):
         if t == 0: return pyo.Constraint.Skip
         return m.s[t] <= 1 - m.v[t-1]
-    model.v_start = pyo.Constraint(model.T, rule=vent_start1)
-    model.v_start = pyo.Constraint(model.T, rule=vent_start2)
-    model.v_start = pyo.Constraint(model.T, rule=vent_start3)
+    model.v_start1 = pyo.Constraint(model.T, rule=vent_start1)
+    model.v_start2 = pyo.Constraint(model.T, rule=vent_start2)
+    model.v_start3 = pyo.Constraint(model.T, rule=vent_start3)
 
     def vent_uptime(m, t):
         horizon = num_t
-        end_t = min(t + m.U_vent - 1, horizon - 1)
+        end_t = min(t + m.U_vent, horizon)
         return sum(m.v[tau] for tau in range(t, end_t)) >= (min(m.U_vent, horizon - t)) * m.s[t]
     model.v_up = pyo.Constraint(model.T, rule=vent_uptime)
 
@@ -151,6 +157,12 @@ def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data, num_t):
         return m.H[t] <= m.H_high + m.M_hum * m.v[t]
     model.h_trig = pyo.Constraint(model.T, rule=hum_trig)
 
+    return model
+
+
+
+def solve_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
+    model = create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data)
     # Solve
     solver = pyo.SolverFactory('gurobi')
     solver.solve(model)
@@ -170,52 +182,23 @@ def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data, num_t):
         "Occ_r1": occ_r1_arr,
         "Occ_r2": occ_r2_arr,
         "outdoor_temperature": data['outdoor_temperature'],
-        "avg_cost": pyo.value(model.obj)
+        "cost_total": pyo.value(model.obj)
     }
     
     return HVAC_results
 
 
-
-
-
-
-
-
-
-from SystemCharacteristics import get_fixed_data
-import pandas as pd
-import numpy as np
-data = get_fixed_data()
-
-# Load all data
-price_data = pd.read_csv('PriceData.csv')
-occ_r1_data = pd.read_csv('OccupancyRoom1.csv')
-occ_r2_data = pd.read_csv('OccupancyRoom2.csv')
-
-# SOlve MILP for all 100 days and store results
-all_results_prof = []
-all_results_ours = []
-for day in range(price_data.shape[0]):
-    price = price_data.iloc[day, :].tolist()
-    Occ_r1 = occ_r1_data.iloc[day, :].tolist()
-    Occ_r2 = occ_r2_data.iloc[day, :].tolist()
+def evaluate_hindsight_model(days=100, file_price_data=DIR / "PriceData.csv", file_occupancy1=DIR / "OccupancyRoom1.csv", file_occupancy2=DIR / "OccupancyRoom2.csv"):
+    all_results = []
+    price_data, occupancy1_data, occupancy2_data = load_data(file_price_data, file_occupancy1, file_occupancy2)
     
-    result = professor_model(price, Occ_r1, Occ_r2, data, data['num_timeslots'])
-    all_results_prof.append(result)
+    for day in range(days):
+        price = price_data.iloc[day].values
+        occupancy1 = occupancy1_data.iloc[day].values
+        occupancy2 = occupancy2_data.iloc[day].values
+       
+        result =solve_professor_model(price, occupancy1, occupancy2, FIXED_DATA)
+        all_results.append(result)
+    
+    return all_results
 
-
-
-
-
-# Output average cost across all days
-average_cost = np.mean([res['avg_cost'] for res in all_results_ours])
-print(f"Average cost across all days ours: {average_cost:.2f}")
-print(f"Average cost across all days professor: {np.mean([res['avg_cost'] for res in all_results_prof]):.2f}")
-
-# Output results of specified days
-# days_to_plot = [0,1]
-# for day in days_to_plot:
-#     print(f"\nPlotting results for day {day}")
-#     # PlotsRestaurant.plot_HVAC_results(all_results[day])
-#     plot_HVAC_results(all_results[day]) # In case you want to use the Plotting function below
