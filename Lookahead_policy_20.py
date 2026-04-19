@@ -1,8 +1,12 @@
 import pyomo.environ as pyo
+from SystemCharacteristics import get_fixed_data
+from PriceProcessRestaurant import price_model
+from OccupancyProcessRestaurant import next_occupancy_levels
 
-
-def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data, num_t):
+def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     
+
+    num_t = len(price_arr)
     model = pyo.ConcreteModel()
     model.T = pyo.RangeSet(0, num_t - 1)
     model.R = pyo.Set(initialize=['r1', 'r2'])
@@ -150,72 +154,58 @@ def professor_model(price_arr, occ_r1_arr, occ_r2_arr, data, num_t):
     def hum_trig(m, t):
         return m.H[t] <= m.H_high + m.M_hum * m.v[t]
     model.h_trig = pyo.Constraint(model.T, rule=hum_trig)
+    return model
 
-    # Solve
+
+def lookahead_policy(state, data, lookaheads=3):
+
+    # generate uncertainty trajecories for price and occupancy
+    prices = []
+    occ_r1 = []
+    occ_r2 = []
+    prices.append(state['price_t'])
+    occ_r1.append(state['Occ1'])
+    occ_r2.append(state['Occ2'])
+
+    for t in range(1, lookaheads):
+        price_t = price_model(prices[-1], prices[-2] if t > 1 else state['price_previous'])
+        occ_r1_t, occ_r2_t = next_occupancy_levels(occ_r1[-1], occ_r2[-1])
+        
+        prices.append(price_t)
+        occ_r1.append(occ_r1_t)
+        occ_r2.append(occ_r2_t)
+
+    # adjust data to reflect curent state
+    data['T1'] = state['T1']
+    data['T2'] = state['T2']
+    data['H'] = state['H']
+    data['vent_counter'] = state['vent_counter']
+    data['low_override_r1'] = state['low_override_r1']
+    data['low_override_r2'] = state['low_override_r2']
+
+    model = professor_model(prices, occ_r1, occ_r2, data)
     solver = pyo.SolverFactory('gurobi')
     solver.solve(model)
 
-    # Final result structure as requested
-    HVAC_results = {
-        "Temp_r1": [pyo.value(model.T_in['r1', t]) for t in model.T],
-        "Temp_r2": [pyo.value(model.T_in['r2', t]) for t in model.T],
-        "h_r1": [pyo.value(model.p['r1', t]) for t in model.T],
-        "h_r2": [pyo.value(model.p['r2', t]) for t in model.T],
-        "v": [pyo.value(model.v[t]) for t in model.T],
-        "s": [pyo.value(model.s[t]) for t in model.T],
-        "z_high": [pyo.value(model.y_high['r1', t]) for t in model.T],
-        "z_low": [pyo.value(model.y_low['r1', t]) for t in model.T],
-        "Hum": [pyo.value(model.H[t]) for t in model.T],
-        "price": price_arr,
-        "Occ_r1": occ_r1_arr,
-        "Occ_r2": occ_r2_arr,
-        "outdoor_temperature": data['outdoor_temperature'],
-        "avg_cost": pyo.value(model.obj)
+
+    # Extract results for the first time step (t=0) model.P['r1',0], model.P['r2',0], model.v[0]
+    heat_power_r1 = model.p['r1', 0]
+    heat_power_r2 = model.p['r2', 0]
+    ventilation_on = model.v[0]
+
+
+    HereAndNowActions = {
+    "HeatPowerRoom1" : heat_power_r1,
+    "HeatPowerRoom2" : heat_power_r2, 
+    "VentilationON" : ventilation_on
     }
     
-    return HVAC_results
+    return HereAndNowActions
 
 
 
+def select_action(state):
+    data = get_fixed_data()
+    HereAndNowActions = lookahead_policy(state, data, lookaheads=10)
 
-
-
-
-
-
-from SystemCharacteristics import get_fixed_data
-import pandas as pd
-import numpy as np
-data = get_fixed_data()
-
-# Load all data
-price_data = pd.read_csv('PriceData.csv')
-occ_r1_data = pd.read_csv('OccupancyRoom1.csv')
-occ_r2_data = pd.read_csv('OccupancyRoom2.csv')
-
-# SOlve MILP for all 100 days and store results
-all_results_prof = []
-all_results_ours = []
-for day in range(price_data.shape[0]):
-    price = price_data.iloc[day, :].tolist()
-    Occ_r1 = occ_r1_data.iloc[day, :].tolist()
-    Occ_r2 = occ_r2_data.iloc[day, :].tolist()
-    
-    result = professor_model(price, Occ_r1, Occ_r2, data, data['num_timeslots'])
-    all_results_prof.append(result)
-
-
-
-
-
-# Output average cost across all days
-average_cost = np.mean([res['avg_cost'] for res in all_results_ours])
-print(f"Average cost across all days ours: {average_cost:.2f}")
-print(f"Average cost across all days professor: {np.mean([res['avg_cost'] for res in all_results_prof]):.2f}")
-
-# Output results of specified days
-# days_to_plot = [0,1]
-# for day in days_to_plot:
-#     print(f"\nPlotting results for day {day}")
-#     # PlotsRestaurant.plot_HVAC_results(all_results[day])
-#     plot_HVAC_results(all_results[day]) # In case you want to use the Plotting function below
+    return HereAndNowActions

@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 DIR = Path(__file__).parent
 np.random.seed(20) # To be able to compare different runs, comment out if you want true randomness
 FIXED_DATA = get_fixed_data()
-DUMMY_POLICY = "dummy_policy_20"
+DUMMY_POLICY = "Dummy_policy_20"
 
 # Loads the correct python file of the policy and the function select_action from that file
 def load_policy(module_name, function_name):
@@ -47,8 +47,9 @@ def plot_HVAC_results(HVAC_results, axes=None):
     # Room Temperatures
     axes[0].plot(T, Temp_r1, label='Room 1 Temp', marker='o')
     axes[0].plot(T, Temp_r2, label='Room 2 Temp', marker='s')
-    axes[0].axhline(18, color='gray', linestyle='--', alpha=0.5)
-    axes[0].axhline(20, color='gray', linestyle='--', alpha=0.5)
+    axes[0].axhline(FIXED_DATA["temp_min_comfort_threshold"], color='red', linestyle='--', alpha=0.5)
+    axes[0].axhline(FIXED_DATA["temp_OK_threshold"], color='green', linestyle='--', alpha=0.5)
+    axes[0].axhline(FIXED_DATA["temp_max_comfort_threshold"], color='red', linestyle='--', alpha=0.5)
     axes[0].set_ylabel("Temperature (°C)")
     axes[0].set_title("Room Temperatures")
     axes[0].legend()
@@ -65,8 +66,7 @@ def plot_HVAC_results(HVAC_results, axes=None):
     # Ventilation and Humidity
     axes[2].step(T, v, where='mid', label='Ventilation ON', color='tab:blue')
     axes[2].plot(T, Hum, label='Humidity (%)', color='tab:orange', marker='o')
-    axes[2].axhline(45, color='gray', linestyle='--', alpha=0.5)
-    axes[2].axhline(60, color='gray', linestyle='--', alpha=0.5)
+    axes[2].axhline(FIXED_DATA["humidity_threshold"], color='red', linestyle='--', alpha=0.5)
     axes[2].set_ylabel("Ventilation / Humidity")
     axes[2].set_title("Ventilation Status and Humidity")
     axes[2].legend()
@@ -102,11 +102,6 @@ def check_and_sanitize_action(select_action, state, dummy_action):
         print(f"[WARNING] Policy crashed: {e}. Using dummy action.")
         return dummy_action(state)
 
-    
-
-    # ---------------------------------------
-    # 3. Clip actions to feasible bounds
-    # ---------------------------------------
     # ---------------------------------------
     # 2. Clip to feasible set (or fail → dummy)
     # ---------------------------------------
@@ -220,7 +215,7 @@ def evaluate_daily_performance(policy_file, price, occupancy1, occupancy2, initi
     return results
 
 
-def evaluate_performance(policy_file="dummy_policy_20.py", days=100, file_price_data=DIR / "PriceData.csv", file_occupancy1=DIR / "OccupancyRoom1.csv", file_occupancy2=DIR / "OccupancyRoom2.csv"):
+def evaluate_performance(policy_file=DUMMY_POLICY, days=100, file_price_data=DIR / "PriceData.csv", file_occupancy1=DIR / "OccupancyRoom1.csv", file_occupancy2=DIR / "OccupancyRoom2.csv"):
     # Setup
     all_results = []
     price_data, occupancy1_data, occupancy2_data = load_data(file_price_data, file_occupancy1, file_occupancy2)
@@ -253,11 +248,11 @@ def evaluate_performance(policy_file="dummy_policy_20.py", days=100, file_price_
 
 def main():
     start_time = time.time()
-    policy_file = "SP_Policy_Restaurant" # TODO replace with your policy file
+    policy_file = "Lookahead_policy_20" # TODO replace with your policy file
     results = evaluate_performance(policy_file)
     plot_HVAC_results(results[0]) 
     plt.tight_layout()
-    #plt.show()
+    plt.show()
     print("\nThe results are:")
     avg_daily_price = sum(day_result["cost_total"] for day_result in results) / len(results)
     print(f"Average daily price: {avg_daily_price:.2f}")
