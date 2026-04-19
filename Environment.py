@@ -248,7 +248,7 @@ def evaluate_performance(policy_file=DUMMY_POLICY, days=100, file_price_data=DIR
 
 def main():
     start_time = time.time()
-    policy_file = "Lookahead_policy_20" # TODO replace with your policy file
+    policy_file = "SP_policy_20" # TODO replace with your policy file
     results = evaluate_performance(policy_file)
     plot_HVAC_results(results[0]) 
     plt.tight_layout()
