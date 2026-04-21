@@ -94,7 +94,7 @@ def check_and_sanitize_action(select_action, state, dummy_action):
         elapsed = time.time() - t0
 
         # If policy is too slow → dummy
-        if elapsed > 15.0:
+        if elapsed > 7.0:
             print(f"[WARNING] Policy too slow ({elapsed:.2f}s). Using dummy action.")
             return dummy_action(state)
 
