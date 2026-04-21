@@ -4,25 +4,43 @@ from PriceProcessRestaurant import price_model
 from OccupancyProcessRestaurant import next_occupancy_levels
 from professor_model import create_professor_model
 
-NUM_LOOKAHEADS = 5
+NUM_LOOKAHEADS = 10
+NUM_TRAJECORIES = 100
 
 def lookahead_policy(state, data, lookaheads=3):
+    lookaheads = min(lookaheads, data['num_timeslots'] - state['current_time'])
 
-    # generate uncertainty trajecories for price and occupancy
+    # generate 100 uncertainty trajecories for price and occupancy and average over them to get expected values for the next time steps
+    all_prices = []
+    all_occ_r1 = []
+    all_occ_r2 = []
+    for i in range(NUM_TRAJECORIES):
+        prices = []
+        occ_r1 = []
+        occ_r2 = []
+        prices.append(state['price_t'])
+        occ_r1.append(state['Occ1'])
+        occ_r2.append(state['Occ2'])
+
+        for t in range(1, lookaheads):
+            price_t = price_model(prices[-1], prices[-2] if t > 1 else state['price_previous'])
+            occ_r1_t, occ_r2_t = next_occupancy_levels(occ_r1[-1], occ_r2[-1])
+            
+            prices.append(price_t)
+            occ_r1.append(occ_r1_t)
+            occ_r2.append(occ_r2_t)
+        all_prices.append(prices)
+        all_occ_r1.append(occ_r1)
+        all_occ_r2.append(occ_r2)
+
+    # average over the trajectories to get expected values
     prices = []
     occ_r1 = []
     occ_r2 = []
-    prices.append(state['price_t'])
-    occ_r1.append(state['Occ1'])
-    occ_r2.append(state['Occ2'])
-
-    for t in range(1, lookaheads):
-        price_t = price_model(prices[-1], prices[-2] if t > 1 else state['price_previous'])
-        occ_r1_t, occ_r2_t = next_occupancy_levels(occ_r1[-1], occ_r2[-1])
-        
-        prices.append(price_t)
-        occ_r1.append(occ_r1_t)
-        occ_r2.append(occ_r2_t)
+    for t in range(lookaheads):
+        prices.append(sum(all_prices[i][t] for i in range(NUM_TRAJECORIES)) / NUM_TRAJECORIES)
+        occ_r1.append(sum(all_occ_r1[i][t] for i in range(NUM_TRAJECORIES)) / NUM_TRAJECORIES)
+        occ_r2.append(sum(all_occ_r2[i][t] for i in range(NUM_TRAJECORIES)) / NUM_TRAJECORIES)
 
     # adjust data to reflect curent state
     data['T1'] = state['T1']
@@ -53,9 +71,8 @@ def lookahead_policy(state, data, lookaheads=3):
     return HereAndNowActions
 
 
-
+import time
 def select_action(state):
     data = get_fixed_data()
     HereAndNowActions = lookahead_policy(state, data, lookaheads=NUM_LOOKAHEADS)
-
     return HereAndNowActions
