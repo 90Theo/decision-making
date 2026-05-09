@@ -1,16 +1,15 @@
 
 #  Task 4: Approximate Dynamic Programming
 
-
 #  ARCHITECTURE OVERVIEW
 #  ─────────────────────
 #  This file implements a two-phase ADP policy with a linear value function
 #  approximation (linear VFA):
 #
 #    V̂_t(s ; θ_t) = θ_t ᵀ φ(s)      [linear in weights θ, nonlinear in s OK]
-#
-#  Phase 1 — TRAINING  (runs once at module import, ~10-20 s)
-#  ─────────────────────────────────────────────────────────
+
+
+### Phase 1 — TRAINING  (runs once at module import, ~10-20 s) ###
 #  Algorithm: Approximate Backward Induction with Forward-Backward passes
 #
 #    For each outer iteration i = 1 … I:
@@ -19,9 +18,10 @@
 #      Backward pass : for t = T-1 down to 0, compute Bellman targets
 #                        ŷ_t^j = c_t^j + θ_{t+1}ᵀ φ(s_{t+1}^j)
 #                      then fit θ_t by ridge regression on those targets.
-#
-#  Phase 2 — DEPLOYMENT  (called every hour by the environment, ~0.1-0.5 s)
-#  ─────────────────────────────────────────────────────────────────────────
+
+
+
+###  Phase 2 — DEPLOYMENT  (called every hour by the environment, ~0.1-0.5 s)###
 #  At each hour t with observed state s_t, solve a tiny 1-step lookahead MILP:
 #
 #    min_{p1, p2, v}  λ_t (p1 + p2 + P^vent · v)  +  θ_{t+1}ᵀ φ(s̃_{t+1})
@@ -30,7 +30,7 @@
 #  expected next-period stochastic values (price, occupancy).  Because dynamics
 #  are linear in decisions, and φ is linear in the state, the VFA term is
 #  LINEAR in (p1, p2, v) → the problem stays a MILP with only 3 variables.
-#  ───────────────────────────────────────────────────────────────────────
+
 
 
 # Imports
@@ -40,7 +40,7 @@ import numpy as np
 import pyomo.environ as pyo
 from SystemCharacteristics import get_fixed_data
 
-# Directory setup
+# Directory
 try:
     _DIR = os.path.dirname(os.path.abspath(__file__))
 except NameError:
@@ -50,7 +50,8 @@ if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
 
 # SECTION 1 — CONSTANTS & SYSTEM PARAMETERS
-# ─────────────────────────────────────────────────────────────────────────────
+
+
 PARAMS   = get_fixed_data()
 T_SLOTS  = int(PARAMS['num_timeslots'])   # 10 hours
 
@@ -62,8 +63,8 @@ RIDGE_ALPHA  = 1e-2   # ridge regularisation λ in (ΦᵀΦ + λI)⁻¹Φᵀy
 
 
 # SECTION 2 — FEATURE FUNCTION  φ(s)
-# ─────────────────────────────────────────────────────────────────────────────
-#
+
+
 #  The linear VFA is:   V̂_t(s ; θ_t) = θ_t ᵀ φ(s)
 #
 #  We choose 12 features that capture the key drivers of future cost.
@@ -113,7 +114,6 @@ def compute_features(state):
 
 
 # SECTION 3 — STOCHASTIC PROCESS MODELS (inlined to avoid import side-effects)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _sample_next_price(price_t, price_prev):
     """
@@ -168,7 +168,6 @@ def _expected_next_occupancy(occ1, occ2):
     return float(np.clip(r1, 20, 50)), float(np.clip(r2, 10, 30))
 
 # SECTION 4 — SYSTEM DYNAMICS  (used during training simulation)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _apply_overrule(state, action):
     """
@@ -280,8 +279,8 @@ def _greedy_action(state):
 
 
 # SECTION 5 — TRAINING: APPROXIMATE BACKWARD INDUCTION
-# ─────────────────────────────────────────────────────────────────────────────
-#
+
+
 #  We use the Forward-Backward algorithm:
 #
 #  For I iterations:
@@ -360,7 +359,7 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
     theta_list = [np.zeros(N_FEATURES) for _ in range(T_SLOTS)]
 
     for iteration in range(n_iter):
-        # ── FORWARD PASS ────────────────────────────────────────────────────
+        ### FORWARD PASS ###
         # Each trajectory is a list of T_SLOTS tuples:
         #   (state_t, action_t, cost_t, state_t+1)
         trajectories = []
@@ -371,7 +370,7 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
             traj  = []
 
             for t in range(T_SLOTS):
-                # ── Choose action ──────────────────────────────────────────
+                # Choose action
                 # Iteration 0: use greedy baseline (fast, seeds the state space)
                 # Iteration 1+: use current ADP MILP policy (better samples)
                 if iteration == 0:
@@ -382,7 +381,7 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
                     action = _solve_lookahead_MILP(state, theta_next)
                     action = _apply_overrule(state, action)
 
-                # ── Advance environment ────────────────────────────────────
+                # Advance environment
                 occ1_next  = occ1s[t + 1]  if t + 1 < T_SLOTS else occ1s[-1]
                 occ2_next  = occ2s[t + 1]  if t + 1 < T_SLOTS else occ2s[-1]
                 price_next = prices[t + 1] if t + 1 < T_SLOTS else prices[-1]
@@ -394,7 +393,7 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
 
             trajectories.append(traj)
 
-        # ── BACKWARD PASS ────────────────────────────────────────────────────
+        ### BACKWARD PASS ###
         # Work backwards t = T-1 → 0.
         # At each t, build the regression problem and solve it analytically.
 
@@ -437,8 +436,8 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
 
 
 # SECTION 6 — DEPLOYMENT: ONE-STEP LOOKAHEAD MILP
-# ─────────────────────────────────────────────────────────────────────────────
-#
+
+
 #  Given current state s_t and pre-trained weights θ_{t+1}, solve:
 #
 #    min_{p1, p2, v}  λ_t (p1 + p2 + P^vent · v)  +  θ_{t+1}ᵀ φ(s̃_{t+1})
@@ -484,7 +483,7 @@ def _solve_lookahead_MILP(state, theta_next):
     d   = PARAMS
     t   = int(state['current_time'])
 
-    # ── Extract current-state scalars ─────────────────────────────────────
+    # Extract current-state scalars
     T1        = float(state['T1'])
     T2        = float(state['T2'])
     H         = float(state['H'])
@@ -498,11 +497,11 @@ def _solve_lookahead_MILP(state, theta_next):
     T_out_t   = float(d['outdoor_temperature'][t])
     T_LOW     = float(d['temp_min_comfort_threshold'])   # 18 °C
 
-    # ── Expected next-period stochastic values (used as constants in MILP) ─
+    # Expected next-period stochastic values (used as constants in MILP) 
     lam_next_exp          = _expected_next_price(lam, lam_prev)
     occ1_next_exp, occ2_next_exp = _expected_next_occupancy(Occ1, Occ2)
 
-    # ── Coefficients for dynamics (keep notation clean) ────────────────────
+    #Coefficients for dynamics (keep notation clean)
     a  = d['heat_exchange_coeff']       # 0.6
     b_ = d['thermal_loss_coeff']        # 0.1   (b_ to avoid shadowing built-in)
     g  = d['heating_efficiency_coeff']  # 1.0
@@ -621,8 +620,7 @@ def _solve_lookahead_MILP(state, theta_next):
 
 
 # SECTION 7 — MODULE-LEVEL TRAINING  (runs once when module is imported)
-# ─────────────────────────────────────────────────────────────────────────────
-#
+
 #  The environment calls select_action() once per hour.
 #  The 15-second per-call limit applies to select_action(), NOT to module
 #  import.  Training runs once at import time so that select_action() only
@@ -632,7 +630,6 @@ _THETA_LIST = train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, verbose=True)
 
 
 # SECTION 9 — POLICY ENTRY POINT  (called by the environment every hour)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def select_action(state):
     """
