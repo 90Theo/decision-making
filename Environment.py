@@ -11,7 +11,7 @@ np.random.seed(20) # To be able to compare different runs, comment out if you wa
 FIXED_DATA = get_fixed_data()
 DUMMY_POLICY = "Dummy_policy_20"
 
-# Loads the correct python file of the policy and the function select_action from that file
+# Loads the correct python file of the policy and imports the function select_action from that file
 def load_policy(module_name, function_name):
     module = importlib.import_module(module_name)
     func = getattr(module, function_name)
@@ -123,23 +123,36 @@ def check_and_sanitize_action(select_action, state, dummy_action):
     return {"HeatPowerRoom1": action["HeatPowerRoom1"], "HeatPowerRoom2": action["HeatPowerRoom2"], "VentilationON": action["VentilationON"]}
 
 def apply_overrule(state, decision):
+    original_decision = decision.copy() # For debugging purposes, can be removed later 
     # HUmidity overrule
     if state['H'] > FIXED_DATA["humidity_threshold"]:
         decision['VentilationON'] = 1
+        if original_decision['VentilationON'] == 0:
+            print(f"[OVERRULE] Humidity {state['H']:.2f}% exceeds threshold. Forcing ventilation ON.")
     elif state['vent_counter'] > 0 and state['vent_counter'] < FIXED_DATA["vent_min_up_time"]:
         decision['VentilationON'] = 1
+        if original_decision['VentilationON'] == 0:
+            print(f"[OVERRULE] Ventilation has been ON for {state['vent_counter']} steps, enforcing minimum up time. Forcing ventilation ON.")
 
     # Heating overrule for room 1
     if state['T1'] > FIXED_DATA["temp_max_comfort_threshold"]:
         decision['HeatPowerRoom1'] = 0
+        if original_decision['HeatPowerRoom1'] > 0:
+            print(f"[OVERRULE] Room 1 Temp {state['T1']:.2f}°C exceeds max comfort threshold. Forcing heater OFF.")
     elif state['low_override_r1'] == 1:
         decision['HeatPowerRoom1'] = FIXED_DATA["heating_max_power"]
+        if original_decision['HeatPowerRoom1'] == 0:
+            print(f"[OVERRULE] Room 1 Temp {state['T1']:.2f}°C below min comfort threshold or not past T_ok yet. Forcing heater ON at max power.")
     
     # Heating overrule for room 2
     if state['T2'] > FIXED_DATA["temp_max_comfort_threshold"]:
         decision['HeatPowerRoom2'] = 0
+        if original_decision['HeatPowerRoom2'] > 0:
+            print(f"[OVERRULE] Room 2 Temp {state['T2']:.2f}°C exceeds max comfort threshold. Forcing heater OFF.")
     elif state['low_override_r2'] == 1:
         decision['HeatPowerRoom2'] = FIXED_DATA["heating_max_power"]
+        if original_decision['HeatPowerRoom2'] == 0:
+            print(f"[OVERRULE] Room 2 Temp {state['T2']:.2f}°C below min comfort threshold or not past T_ok yet. Forcing heater ON at max power.")
     return decision
 
 # not needed, Overrule and check and sanitize cover this
