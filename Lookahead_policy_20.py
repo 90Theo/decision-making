@@ -4,12 +4,12 @@ from PriceProcessRestaurant import price_model
 from OccupancyProcessRestaurant import next_occupancy_levels
 
 
+
+
 NUM_LOOKAHEADS = 10
 NUM_TRAJECORIES = 100
 
-
-
-def create_professor_model(price_mat, occ_r1_mat, occ_r2_mat, scenario_prob, data):
+def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     
     num_t = data['num_timeslots']
     model = pyo.ConcreteModel()
@@ -26,9 +26,9 @@ def create_professor_model(price_mat, occ_r1_mat, occ_r2_mat, scenario_prob, dat
     model.p = pyo.Var(model.R, model.T, within=pyo.NonNegativeReals, bounds=(0,data['heating_max_power'])) 
     model.T_in = pyo.Var(model.R, model.T, within=pyo.Reals)         
     model.H = pyo.Var(model.T, within=pyo.NonNegativeReals, bounds=(0,100))          
-    model.v = pyo.Var(model.T, within=pyo.Binary)                    
-    model.s = pyo.Var(model.T, within=pyo.Binary)                    
-    model.u = pyo.Var(model.R, model.T, within=pyo.Binary)          
+    model.v = pyo.Var(model.T, within=pyo.Binary)
+    model.s = pyo.Var(model.T, within=pyo.Binary)
+    model.u = pyo.Var(model.R, model.T, within=pyo.Binary)
     
     # Auxiliary variables
     model.y_low = pyo.Var(model.R, model.T, within=pyo.Binary) 
@@ -114,9 +114,6 @@ def create_professor_model(price_mat, occ_r1_mat, occ_r2_mat, scenario_prob, dat
     model.ok_1 = pyo.Constraint(model.R, model.T, rule=ok_temp_1)
     model.ok_2 = pyo.Constraint(model.R, model.T, rule=ok_temp_2)
 
-    # TODO Ccreate non-anticipativity constraints
-
-
     # Overrule Logic
     def ovr_1(m, r, t): 
         return m.u[r, t] >= m.y_low[r, t]
@@ -156,6 +153,7 @@ def create_professor_model(price_mat, occ_r1_mat, occ_r2_mat, scenario_prob, dat
         horizon = num_t
         end_t = min(t + m.U_vent, horizon)
         return sum(m.v[tau] for tau in range(t, end_t)) >= (min(m.U_vent, horizon - t)) * m.s[t]
+    
     # specififc constraint only for lookahead policy, so that it will know to force ventilation on if its needed.
     def vent_uptime2(m):
         remaining = data['vent_min_up_time'] - data['vent_counter']
@@ -165,13 +163,13 @@ def create_professor_model(price_mat, occ_r1_mat, occ_r2_mat, scenario_prob, dat
     model.v_up1 = pyo.Constraint(model.T, rule=vent_uptime1)
     model.v_up2 = pyo.Constraint(rule=vent_uptime2)
 
+
     # Humidity Trigger
     def hum_trig(m, t):
         return m.H[t] <= m.H_high + m.M_hum * m.v[t]
     model.h_trig = pyo.Constraint(model.T, rule=hum_trig)
 
     return model
-
 
 
 def lookahead_policy(state, data, lookaheads=3):
