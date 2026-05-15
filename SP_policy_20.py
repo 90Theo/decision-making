@@ -13,8 +13,9 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 params = SystemCharacteristics.get_fixed_data()
 
-def generate_scenario_tree(state, L=3, branching=3, n_samples=50):
+def generate_scenario_tree(state, L=4, branching=3, n_samples=10):
     t0 = state["current_time"]
+    L = min(L, params['num_timeslots'] - t0)
     # First we make the root node
     nodes = [{
         'id': 0,
@@ -239,7 +240,7 @@ def build_and_solve_sp(params, state, nodes, scenarios):
 
     # Solve 
     solver = pyo.SolverFactory('gurobi', solver_io='python')
-    solver.options['TimeLimit'] = 10
+    solver.options['TimeLimit'] = 5
     solver.options['MIPGap'] = 0.01
     solver.options['OutputFlag'] = 0
     result = solver.solve(model, tee=False)
@@ -252,12 +253,7 @@ def build_and_solve_sp(params, state, nodes, scenarios):
     return hp1, hp2, vent
 
 def select_action(state):
-    current_time = state["current_time"]
-    remaining = params['num_timeslots'] - current_time
-    L = 4
-    if remaining < L:
-        L = remaining
-    nodes, scenarios = generate_scenario_tree(state, L, branching=3)
+    nodes, scenarios = generate_scenario_tree(state)
     hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios)
     
     HereAndNowActions = {
