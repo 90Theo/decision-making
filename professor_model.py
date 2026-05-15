@@ -62,9 +62,15 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     model.obj = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
     # Constraints
+
+    # INitial constraints
     model.T_in['r1', 0].fix(data['T1'])
     model.T_in['r2', 0].fix(data['T2'])
     model.H[0].fix(data['H'])
+    model.u['r1', 0].fix(data['low_override_r1'])
+    model.u['r2', 0].fix(data['low_override_r2'])
+    
+    
 
     # Temperature Dynamics with dynamic occupancy
     def temp_dynamics_rule(m, r, t):

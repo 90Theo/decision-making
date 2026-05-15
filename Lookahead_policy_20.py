@@ -68,6 +68,10 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     model.T_in['r1', 0].fix(data['T1'])
     model.T_in['r2', 0].fix(data['T2'])
     model.H[0].fix(data['H'])
+    
+    # u is the override controller (heater stays on until T_OK); seed from state
+    model.u['r1', 0].fix(data['low_override_r1'])
+    model.u['r2', 0].fix(data['low_override_r2'])
 
     # Temperature Dynamics with dynamic occupancy
     def temp_dynamics_rule(m, r, t):
@@ -114,7 +118,7 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     model.ok_1 = pyo.Constraint(model.R, model.T, rule=ok_temp_1)
     model.ok_2 = pyo.Constraint(model.R, model.T, rule=ok_temp_2)
 
-    # Overrule Logic
+    # Overrule Logic   
     def ovr_1(m, r, t): 
         return m.u[r, t] >= m.y_low[r, t]
     def ovr_2(m, r, t):
@@ -207,7 +211,7 @@ def lookahead_policy(state, data, lookaheads=3):
         occ_r1.append(sum(all_occ_r1[i][t] for i in range(NUM_TRAJECORIES)) / NUM_TRAJECORIES)
         occ_r2.append(sum(all_occ_r2[i][t] for i in range(NUM_TRAJECORIES)) / NUM_TRAJECORIES)
 
-    # adjust data to reflect curent state
+    # adjust data to reflect current state
     data['T1'] = state['T1']
     data['T2'] = state['T2']
     data['H'] = state['H']
@@ -215,6 +219,9 @@ def lookahead_policy(state, data, lookaheads=3):
     data['low_override_r1'] = state['low_override_r1']
     data['low_override_r2'] = state['low_override_r2']
     data['num_timeslots'] = lookaheads
+    data['outdoor_temperature'] = data['outdoor_temperature'][state['current_time']:]
+
+
 
     model = create_professor_model(prices, occ_r1, occ_r2, data)
     solver = pyo.SolverFactory('gurobi')
