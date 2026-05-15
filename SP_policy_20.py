@@ -13,7 +13,7 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 params = SystemCharacteristics.get_fixed_data()
 
-def generate_scenario_tree(state, L=3, branching=3, n_samples=30):
+def generate_scenario_tree(state, L=3, branching=3, n_samples=50):
     t0 = state["current_time"]
     # First we make the root node
     nodes = [{
@@ -257,7 +257,7 @@ def select_action(state):
     L = 4
     if remaining < L:
         L = remaining
-    nodes, scenarios = generate_scenario_tree(state, L, branching=2)
+    nodes, scenarios = generate_scenario_tree(state, L, branching=3)
     hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios)
     
     HereAndNowActions = {
