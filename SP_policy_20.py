@@ -252,9 +252,9 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
 
     return hp1, hp2, vent
 
-def select_action(state, total_budget=7.0):
+def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
     t_start = time.time()
-    nodes, scenarios = generate_scenario_tree(state)
+    nodes, scenarios = generate_scenario_tree(state, L=L, branching=branching, n_samples=n_samples)
     tree_time = time.time() - t_start
     BUFFER = 0.1 + 0.0008 * len(nodes) # Linear buffer for Pyomo-to-Gurobi serialization
     solve_time = max(total_budget - tree_time - BUFFER, 0.5)
@@ -265,5 +265,5 @@ def select_action(state, total_budget=7.0):
         "HeatPowerRoom2" : hp2,
         "VentilationON" : vent
     }
-    
+
     return HereAndNowActions
