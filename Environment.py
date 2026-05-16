@@ -1,4 +1,3 @@
-from SystemCharacteristics import get_fixed_data
 import pandas as pd
 import importlib
 import time
@@ -6,12 +5,128 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
+
+def get_fixed_data():
+    """
+    Returns the fixed data for the heating + ventilation system.
+    THIS CODE SHOULD NOT BE CHANGED BY STUDENTS.
+    """
+
+    # ------------------------------
+    # Simulation settings
+    # ------------------------------
+
+    num_timeslots = 10  # number of discrete simulation steps (hours)
+
+
+    return {
+
+        # Number of timeslots (hours)
+        'num_timeslots': num_timeslots,
+
+
+        # ------------------------------
+        # Initial state
+        # ------------------------------
+        
+        "T1": 21.0,  #initial temperature at room 1
+        "T2": 21.0, #initial temperature at room 2
+        "H": 40.0, #initial humidity
+        "Occ1": np.random.uniform(25, 35), #initial occupancy at room 1
+        "Occ2": np.random.uniform(15, 25), #initial occupancy at room 2
+        "price_t": np.random.uniform(2, 8),  #initial price
+        "price_previous": np.random.uniform(2, 8),  #initial previous price
+        "vent_counter": 0, # initial counter (the ventilation was not ON previously)
+        "low_override_r1": 0,  #initial condition of the overrule controller in room 1 (OFF)
+        "low_override_r2": 0, #initial condition of the overrule controller in room 2 (OFF)
+        
+
+        # ------------------------------
+        # Heating system parameters
+        # ------------------------------
+
+        # Maximum heating power (kW)
+        # Heater can output between 0 and this value.
+        'heating_max_power': 3.0,
+
+        # Heat exchange coefficient between rooms
+        # (°C change per hour per °C difference between rooms)
+        'heat_exchange_coeff': 0.6,
+
+        # Heating efficiency:
+        # Increase in room temperature per kW of heating power (°C per hour per kW)
+        'heating_efficiency_coeff': 1.0,
+
+        # Thermal loss coefficient:
+        # Fraction of indoor-outdoor temperature difference lost per hour
+        # (°C change per hour per °C difference between inddors and outdoors temperature)
+        'thermal_loss_coeff': 0.1,
+
+        # Ventilation cooling effect:
+        # Temperature decrease in the room for each hour that ventilation is ON (°C)
+        'heat_vent_coeff': 0.7,
+
+        # Occupancy heat gain:
+        # Temperature increase per hour per person in the room (°C)
+        'heat_occupancy_coeff': 0.02,
+
+
+        # ------------------------------
+        # Comfort and control thresholds (°C)
+        # ------------------------------
+
+        # Lower threshold for Overrule heater activation
+        'temp_min_comfort_threshold': 18.0,
+
+        # Temperature above which the Overrule controller is deactived
+        'temp_OK_threshold': 22.0,
+
+        # Hard upper limit: when exceeded, heater must be OFF
+        'temp_max_comfort_threshold': 26.0,
+
+
+        # ------------------------------
+        # Outdoor temperature (°C)
+        # Known “in hindsight” time series provided to the MILP.
+        # A simple sinusoidal profile is used as an example.
+        # ------------------------------
+
+        'outdoor_temperature': [
+            3 * np.sin(2 * np.pi * t / num_timeslots - np.pi/2)
+            for t in range(num_timeslots)
+        ],
+
+
+        # ------------------------------
+        # Ventilation system parameters
+        # ------------------------------
+
+        # Minimum number of consecutive hours that ventilation must remain ON
+        # after being started
+        'vent_min_up_time': 3,
+
+        # Humidity threshold above which overrule controller forces ventilation ON (%)
+        'humidity_threshold': 70.0,
+
+        # Electrical power consumption of ventilation when ON (kW)
+        'ventilation_power': 2.0,
+        
+        # Degrees of humidity increase per hour per person
+        'humidity_occupancy_coeff':0.18,
+        
+        # Degrees of humidity decrease per hour that ventilation is ON
+        'humidity_vent_coeff': 15
+        
+    }
+
+
+
 DIR = Path(__file__).parent
 np.random.seed(20) # To be able to compare different runs, comment out if you want true randomness
 FIXED_DATA = get_fixed_data()
 DUMMY_POLICY = "Dummy_policy_20"
 
-# Loads the correct python file of the policy and the function select_action from that file
+# Loads the correct python file of the policy and imports the function select_action from that file
 def load_policy(module_name, function_name):
     module = importlib.import_module(module_name)
     func = getattr(module, function_name)
@@ -123,23 +238,36 @@ def check_and_sanitize_action(select_action, state, dummy_action):
     return {"HeatPowerRoom1": action["HeatPowerRoom1"], "HeatPowerRoom2": action["HeatPowerRoom2"], "VentilationON": action["VentilationON"]}
 
 def apply_overrule(state, decision):
+    original_decision = decision.copy() # For debugging purposes, can be removed later 
     # HUmidity overrule
     if state['H'] > FIXED_DATA["humidity_threshold"]:
         decision['VentilationON'] = 1
+        if original_decision['VentilationON'] == 0:
+            print(f"[OVERRULE] Humidity {state['H']:.2f}% exceeds threshold. Forcing ventilation ON.")
     elif state['vent_counter'] > 0 and state['vent_counter'] < FIXED_DATA["vent_min_up_time"]:
         decision['VentilationON'] = 1
+        if original_decision['VentilationON'] == 0:
+            print(f"[OVERRULE] Ventilation has been ON for {state['vent_counter']} steps, enforcing minimum up time. Forcing ventilation ON.")
 
     # Heating overrule for room 1
     if state['T1'] > FIXED_DATA["temp_max_comfort_threshold"]:
         decision['HeatPowerRoom1'] = 0
+        if original_decision['HeatPowerRoom1'] > 0:
+            print(f"[OVERRULE] Room 1 Temp {state['T1']:.2f}°C exceeds max comfort threshold. Forcing heater OFF.")
     elif state['low_override_r1'] == 1:
         decision['HeatPowerRoom1'] = FIXED_DATA["heating_max_power"]
+        if original_decision['HeatPowerRoom1'] == 0:
+            print(f"[OVERRULE] Room 1 Temp {state['T1']:.2f}°C below min comfort threshold or not past T_ok yet. Forcing heater ON at max power.")
     
     # Heating overrule for room 2
     if state['T2'] > FIXED_DATA["temp_max_comfort_threshold"]:
         decision['HeatPowerRoom2'] = 0
+        if original_decision['HeatPowerRoom2'] > 0:
+            print(f"[OVERRULE] Room 2 Temp {state['T2']:.2f}°C exceeds max comfort threshold. Forcing heater OFF.")
     elif state['low_override_r2'] == 1:
         decision['HeatPowerRoom2'] = FIXED_DATA["heating_max_power"]
+        if original_decision['HeatPowerRoom2'] == 0:
+            print(f"[OVERRULE] Room 2 Temp {state['T2']:.2f}°C below min comfort threshold or not past T_ok yet. Forcing heater ON at max power.")
     return decision
 
 # not needed, Overrule and check and sanitize cover this
@@ -170,8 +298,8 @@ def apply_dynamics(state, decision, occupancy1, occupancy2, price):
         - FIXED_DATA["humidity_vent_coeff"] * decision['VentilationON']
     next_state["price_previous"] = state['price_t']
     next_state["vent_counter"] = state['vent_counter'] + 1 if decision['VentilationON'] == 1 else 0
-    next_state["low_override_r1"] = 1 if next_state['T1'] <= FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r1'] == 1 and next_state['T1'] < FIXED_DATA["temp_OK_threshold"]) else 0
-    next_state["low_override_r2"] = 1 if next_state['T2'] <= FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r2'] == 1 and next_state['T2'] < FIXED_DATA["temp_OK_threshold"]) else 0
+    next_state["low_override_r1"] = 1 if next_state['T1'] < FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r1'] == 1 and next_state['T1'] < FIXED_DATA["temp_OK_threshold"]) else 0
+    next_state["low_override_r2"] = 1 if next_state['T2'] < FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r2'] == 1 and next_state['T2'] < FIXED_DATA["temp_OK_threshold"]) else 0
     return next_state
 
 

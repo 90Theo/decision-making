@@ -23,9 +23,9 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     model.p = pyo.Var(model.R, model.T, within=pyo.NonNegativeReals, bounds=(0,data['heating_max_power'])) 
     model.T_in = pyo.Var(model.R, model.T, within=pyo.Reals)         
     model.H = pyo.Var(model.T, within=pyo.NonNegativeReals, bounds=(0,100))          
-    model.v = pyo.Var(model.T, within=pyo.Binary)                    
-    model.s = pyo.Var(model.T, within=pyo.Binary)                    
-    model.u = pyo.Var(model.R, model.T, within=pyo.Binary)          
+    model.v = pyo.Var(model.T, within=pyo.Binary)
+    model.s = pyo.Var(model.T, within=pyo.Binary)
+    model.u = pyo.Var(model.R, model.T, within=pyo.Binary)
     
     # Auxiliary variables
     model.y_low = pyo.Var(model.R, model.T, within=pyo.Binary) 
@@ -62,9 +62,15 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     model.obj = pyo.Objective(rule=obj_rule, sense=pyo.minimize)
 
     # Constraints
+
+    # INitial constraints
     model.T_in['r1', 0].fix(data['T1'])
     model.T_in['r2', 0].fix(data['T2'])
     model.H[0].fix(data['H'])
+    model.u['r1', 0].fix(data['low_override_r1'])
+    model.u['r2', 0].fix(data['low_override_r2'])
+    
+    
 
     # Temperature Dynamics with dynamic occupancy
     def temp_dynamics_rule(m, r, t):
@@ -135,7 +141,7 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
 
     # Ventilation Startup & Min Up-time
     def vent_start1(m, t):
-        if t == 0: return m.s[t] >= m.v[t]
+        if t == 0: return m.s[t] >= m.v[t] - data['vent_counter']
         return m.s[t] >= m.v[t] - m.v[t-1]
     def vent_start2(m, t):
         return m.s[t] <= m.v[t]

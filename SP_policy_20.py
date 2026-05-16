@@ -13,8 +13,9 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 params = SystemCharacteristics.get_fixed_data()
 
-def generate_scenario_tree(state, L=3, branching=3, n_samples=30):
+def generate_scenario_tree(state, L=4, branching=3, n_samples=10):
     t0 = state["current_time"]
+    L = min(L, params['num_timeslots'] - t0)
     # First we make the root node
     nodes = [{
         'id': 0,
@@ -115,19 +116,18 @@ def build_and_solve_sp(params, state, nodes, scenarios):
 
     # Big-M constants
     M_T = 50.0 # This one is for temperature so 50 C° seems safe
-    M_H = 200.0 # This is for humidity so 200% should be completely safe
+    M_H = 100.0 # This is for humidity so 200% should be completely safe
 
     # Decision variables
     model.p = pyo.Var(model.R, model.N, domain=pyo.NonNegativeReals, bounds=(0, P_max)) # heating power
-    model.T = pyo.Var(model.R, model.N, bounds=(0, 50)) # room temperature
-    model.H = pyo.Var(model.N, bounds=(0, 200)) # humidity
+    model.T = pyo.Var(model.R, model.N, within=pyo.Reals) # room temperature
+    model.H = pyo.Var(model.N, bounds=(0, 100)) # humidity
     model.v = pyo.Var(model.N, domain=pyo.Binary) # ventilation on/off
     model.s = pyo.Var(model.N, domain=pyo.Binary) # ventilation start (1 if switched on)
     model.yLow = pyo.Var(model.R, model.N, domain=pyo.Binary) # 1 if temp <= T_low
     model.yOK = pyo.Var(model.R, model.N, domain=pyo.Binary) # 1 if temp >= T_OK
     model.yHigh = pyo.Var(model.R, model.N, domain=pyo.Binary) # 1 if temp >= T_high
     model.u = pyo.Var(model.R, model.N, domain=pyo.Binary) # low-override active
-    model.c_v = pyo.Var(model.N, domain=pyo.Integers, bounds=(0, nT)) # consecutive hours vent has been on
 
     # We define the objective function which is to minimize the expected electricity cost 
     def objective_function(m):
@@ -154,7 +154,6 @@ def build_and_solve_sp(params, state, nodes, scenarios):
             model.T[1, 0].fix(state["T1"])
             model.T[2, 0].fix(state["T2"])
             model.H[0].fix(state["H"])
-            model.c_v[0].fix(state["vent_counter"])
             model.u[1, 0].fix(state["low_override_r1"])
             model.u[2, 0].fix(state["low_override_r2"])
 
@@ -201,11 +200,6 @@ def build_and_solve_sp(params, state, nodes, scenarios):
                 + e_occ * (parent['occ1'] + parent['occ2'])
                 - e_vent * model.v[parent_id])
 
-            # Consecutive ventilation counter
-            model.cons.add(model.c_v[n_id] <= nT * model.v[parent_id])
-            model.cons.add(model.c_v[n_id] >= model.c_v[parent_id] + 1 - nT * (1 - model.v[parent_id]))
-            model.cons.add(model.c_v[n_id] <= model.c_v[parent_id] + 1)
-
             # Low-override controller logic
             for r in rooms:
                 model.cons.add(model.u[r, n_id] >= model.yLow[r, n_id]) # Must turn on if yLow == 1
@@ -246,7 +240,7 @@ def build_and_solve_sp(params, state, nodes, scenarios):
 
     # Solve 
     solver = pyo.SolverFactory('gurobi', solver_io='python')
-    solver.options['TimeLimit'] = 10
+    solver.options['TimeLimit'] = 5
     solver.options['MIPGap'] = 0.01
     solver.options['OutputFlag'] = 0
     result = solver.solve(model, tee=False)
@@ -259,12 +253,7 @@ def build_and_solve_sp(params, state, nodes, scenarios):
     return hp1, hp2, vent
 
 def select_action(state):
-    current_time = state["current_time"]
-    remaining = params['num_timeslots'] - current_time
-    L = 3
-    if remaining < L:
-        L = remaining
-    nodes, scenarios = generate_scenario_tree(state, L, branching=3)
+    nodes, scenarios = generate_scenario_tree(state)
     hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios)
     
     HereAndNowActions = {
