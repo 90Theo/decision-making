@@ -42,7 +42,7 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     model.T_out = pyo.Param(model.T, initialize={t: data['outdoor_temperature'][t] for t in model.T})
     model.P_vent = pyo.Param(initialize=data['ventilation_power'])
     model.P = pyo.Param(model.R, initialize={r: data['heating_max_power'] for r in model.R})
-    model.T_low = pyo.Param(initialize=data['temp_min_comfort_threshold'])
+    model.T_low = pyo.Param(initialize=data['temp_min_comfort_threshold'] + 0.01)
     model.T_high = pyo.Param(initialize=data['temp_max_comfort_threshold'])
     model.T_OK = pyo.Param(initialize=data['temp_OK_threshold'])
     model.H_high = pyo.Param(initialize=data['humidity_threshold'])

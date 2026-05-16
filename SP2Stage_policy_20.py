@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pyomo.environ as pyo
 from sklearn.cluster import KMeans
@@ -13,8 +14,9 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 params = SystemCharacteristics.get_fixed_data()
 
-def generate_scenario_tree(state, L=3, branching=3, n_samples=30):
+def generate_scenario_tree(state, branching=3, n_samples=30):
     t0 = state["current_time"]
+    L = min(2, params['num_timeslots'] - t0)
     # First we make the root node
     nodes = [{
         'id': 0,
@@ -85,7 +87,7 @@ def generate_scenario_tree(state, L=3, branching=3, n_samples=30):
         scenarios.append(path)
     return nodes, scenarios
 
-def build_and_solve_sp(params, state, nodes, scenarios):
+def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
     model = pyo.ConcreteModel()
 
     # We make a list with each set: The rooms and the nodes. This will make it easy to loop thorugh them later
@@ -105,7 +107,7 @@ def build_and_solve_sp(params, state, nodes, scenarios):
     z_occ = params['heat_occupancy_coeff']
     e_occ = params['humidity_occupancy_coeff']
     e_vent = params['humidity_vent_coeff']
-    T_low  = params['temp_min_comfort_threshold']
+    T_low  = params['temp_min_comfort_threshold'] + 0.01
     T_OK = params['temp_OK_threshold']
     T_high = params['temp_max_comfort_threshold']
     H_high = params['humidity_threshold']
@@ -237,10 +239,9 @@ def build_and_solve_sp(params, state, nodes, scenarios):
             n_ahead = min(U_vent, len(remaining))
             model.cons.add(sum(model.v[remaining[j]] for j in range(n_ahead))>= n_ahead * model.s[n_id])
 
-    # Solve 
+    # Solve
     solver = pyo.SolverFactory('gurobi', solver_io='python')
-    solver.options['TimeLimit'] = 10
-    solver.options['MIPGap'] = 0.01
+    solver.options['TimeLimit'] = time_limit
     solver.options['OutputFlag'] = 0
     result = solver.solve(model, tee=False)
 
@@ -251,19 +252,18 @@ def build_and_solve_sp(params, state, nodes, scenarios):
 
     return hp1, hp2, vent
 
-def select_action(state):
-    current_time = state["current_time"]
-    remaining = params['num_timeslots'] - current_time
-    L = 2
-    if remaining < L:
-        L = remaining
-    nodes, scenarios = generate_scenario_tree(state, L, branching=3)
-    hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios)
-    
+def select_action(state, total_budget=7.0):
+    t_start = time.time()
+    nodes, scenarios = generate_scenario_tree(state)
+    tree_time = time.time() - t_start
+    BUFFER = 0.05 + 0.0007 * len(nodes) # Linear buffer for Pyomo-to-Gurobi serialization
+    solve_time = max(total_budget - tree_time - BUFFER, 0.5)
+    hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios, time_limit=solve_time)
+
     HereAndNowActions = {
         "HeatPowerRoom1" : hp1,
         "HeatPowerRoom2" : hp2,
         "VentilationON" : vent
     }
-    
+
     return HereAndNowActions
