@@ -62,8 +62,8 @@ T_SLOTS  = int(PARAMS['num_timeslots'])   # 10 hours
 # gives 500 data points for a 12-feature ridge regression — statistically solid.
 # With Gurobi (100× faster than HiGHS), 200 scenarios is feasible in <5 s.
 N_FEATURES   = 12
-N_SCENARIOS  = 100
-N_ITER       = 3
+N_SCENARIOS  = 200
+N_ITER       = 5
 RIDGE_ALPHA  = 1e-2
 
 # NEW: multi-stage lookahead depth
@@ -594,6 +594,42 @@ def _solve_multistage_MILP(state, theta_list, L):
     m.z1 = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
     m.z2 = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
 
+    # ── Overrule-tracking variables for future stages ─────────────────
+    #
+    #  The environment's overrule controller enforces:
+    #    lo_r(τ)=1  →  p_r(τ) = P_MAX       (heating forced to max)
+    #    H(τ) > H_THR  →  v(τ) = 1          (ventilation forced on)
+    #
+    #  lo_r(τ) = 1  iff  T_r(τ) ≤ T_LOW                    [cold trigger]
+    #                 OR  (lo_r(τ-1)=1 AND T_r(τ) < T_OK)   [hysteresis]
+    #
+    #  Linearised with big-M indicator constraints.  Variables:
+    #    cold_r(τ)     ≡ [T_r(τ) ≤ T_LOW]
+    #    not_warm_r(τ) ≡ [T_r(τ) < T_OK]
+    #    bc_r(τ)       = AND(lo_r(τ−1), not_warm_r(τ))
+    #    lo_r(τ)       = OR(cold_r(τ), bc_r(τ))
+    #    hum_hi(τ)     ≡ [H(τ) > H_THR]
+    #
+    #  Total new binaries:  ~(6·L + L-1) per room pair ≈ 20 for L=3.
+    #  Gurobi solves this in < 0.1 s.
+
+    _future_s = list(range(1, L + 1))            # state stages 1 … L
+
+    m.lo1       = pyo.Var(states, domain=pyo.Binary)
+    m.lo2       = pyo.Var(states, domain=pyo.Binary)
+    m.lo1[0].fix(float(state['low_override_r1']))
+    m.lo2[0].fix(float(state['low_override_r2']))
+
+    m.cold_r1     = pyo.Var(_future_s, domain=pyo.Binary)
+    m.cold_r2     = pyo.Var(_future_s, domain=pyo.Binary)
+    m.not_warm_r1 = pyo.Var(_future_s, domain=pyo.Binary)
+    m.not_warm_r2 = pyo.Var(_future_s, domain=pyo.Binary)
+    m.bc_r1       = pyo.Var(_future_s, domain=pyo.Binary)
+    m.bc_r2       = pyo.Var(_future_s, domain=pyo.Binary)
+
+    if L > 1:
+        m.hum_hi = pyo.Var(list(range(1, L)), domain=pyo.Binary)
+
     # ── Fix initial state (τ = 0) ─────────────────────────────────────
     m.T1[0].fix(float(state['T1']))
     m.T2[0].fix(float(state['T2']))
@@ -723,6 +759,69 @@ def _solve_multistage_MILP(state, theta_list, L):
         remaining = U_V - vc_obs
         for j in range(min(remaining, L)):
             m.overrule.add(m.v[j] == 1)
+
+    # ── Overrule tracking at future stages (τ ≥ 1) ───────────────────
+    #
+    #  For each state stage τ = 1 … L, track the low-override flag:
+    #
+    #    lo_r(τ) = 1  iff  T_r(τ) ≤ T_LOW             [cold trigger]
+    #                  OR  (lo_r(τ-1)=1 AND T_r(τ) < T_OK) [hysteresis]
+    #
+    #  Enforcement at decision stages τ = 1 … L−1:
+    #    lo_r(τ) = 1  →  p_r(τ) = P_MAX
+    #    H(τ) > H_THR →  v(τ) = 1
+
+    T_OK   = float(d['temp_OK_threshold'])     # 22 °C
+    H_THR  = float(d['humidity_threshold'])    # 70 %
+    M_T    = 25.0     # big-M for temperature range (~5–40 °C)
+    M_H    = 150.0    # big-M for humidity range   (~0–200 %)
+    _DELTA = 0.001    # offset so cold indicator activates at T ≤ T_LOW
+
+    m.or_track = pyo.ConstraintList()
+
+    for tau in range(1, L + 1):
+        # ── cold_r(τ) ≡ [T_r(τ) ≤ T_LOW] ──────────────────────────
+        #  cold=0 → T > T_LOW :  T ≥ T_LOW + δ − M·cold
+        #  cold=1 → T ≤ T_LOW :  T ≤ T_LOW + M·(1−cold)
+        m.or_track.add(m.T1[tau] >= T_LOW + _DELTA - M_T * m.cold_r1[tau])
+        m.or_track.add(m.T1[tau] <= T_LOW + M_T * (1 - m.cold_r1[tau]))
+        m.or_track.add(m.T2[tau] >= T_LOW + _DELTA - M_T * m.cold_r2[tau])
+        m.or_track.add(m.T2[tau] <= T_LOW + M_T * (1 - m.cold_r2[tau]))
+
+        # ── not_warm_r(τ) ≡ [T_r(τ) < T_OK] ───────────────────────
+        #  nw=0 → T ≥ T_OK :  T ≥ T_OK − M·nw
+        #  nw=1 → T < T_OK :  T ≤ T_OK + M·(1−nw)
+        m.or_track.add(m.T1[tau] >= T_OK - M_T * m.not_warm_r1[tau])
+        m.or_track.add(m.T1[tau] <= T_OK + M_T * (1 - m.not_warm_r1[tau]))
+        m.or_track.add(m.T2[tau] >= T_OK - M_T * m.not_warm_r2[tau])
+        m.or_track.add(m.T2[tau] <= T_OK + M_T * (1 - m.not_warm_r2[tau]))
+
+        # ── bc_r(τ) = AND(lo_prev, not_warm_r(τ)) ──────────────────
+        m.or_track.add(m.bc_r1[tau] <= m.lo1[tau - 1])
+        m.or_track.add(m.bc_r1[tau] <= m.not_warm_r1[tau])
+        m.or_track.add(m.bc_r1[tau] >= m.lo1[tau - 1] + m.not_warm_r1[tau] - 1)
+        m.or_track.add(m.bc_r2[tau] <= m.lo2[tau - 1])
+        m.or_track.add(m.bc_r2[tau] <= m.not_warm_r2[tau])
+        m.or_track.add(m.bc_r2[tau] >= m.lo2[tau - 1] + m.not_warm_r2[tau] - 1)
+
+        # ── lo_r(τ) = OR(cold_r(τ), bc_r(τ)) ──────────────────────
+        m.or_track.add(m.lo1[tau] >= m.cold_r1[tau])
+        m.or_track.add(m.lo1[tau] >= m.bc_r1[tau])
+        m.or_track.add(m.lo1[tau] <= m.cold_r1[tau] + m.bc_r1[tau])
+        m.or_track.add(m.lo2[tau] >= m.cold_r2[tau])
+        m.or_track.add(m.lo2[tau] >= m.bc_r2[tau])
+        m.or_track.add(m.lo2[tau] <= m.cold_r2[tau] + m.bc_r2[tau])
+
+    # ── Enforcement at future decision stages τ = 1, …, L−1 ────────
+    for tau in range(1, L):
+        # Heating low override:  lo_r(τ)=1 → p_r(τ) = P_MAX
+        m.or_track.add(m.p1[tau] >= P_MAX * m.lo1[tau])
+        m.or_track.add(m.p2[tau] >= P_MAX * m.lo2[tau])
+
+        # Humidity overrule:  H(τ) > H_THR → v(τ) = 1
+        # hum_hi(τ)=1 when H(τ) exceeds threshold (optimizer prefers 0)
+        m.or_track.add(m.H[tau] - H_THR <= M_H * m.hum_hi[tau])
+        m.or_track.add(m.v[tau] >= m.hum_hi[tau])
 
     # ── Terminal VFA:  θ_{t+L}ᵀ φ(s̃_{t+L}) ─────────────────────────
     #
