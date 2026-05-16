@@ -14,6 +14,8 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 params = SystemCharacteristics.get_fixed_data()
 
+last_solve_info = {'optimal': True, 'mip_gap': 0.0}
+
 def generate_scenario_tree(state, L=6, branching=3, n_samples=30):
     t0 = state["current_time"]
     L = min(L, params['num_timeslots'] - t0)
@@ -107,7 +109,7 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
     z_occ = params['heat_occupancy_coeff']
     e_occ = params['humidity_occupancy_coeff']
     e_vent = params['humidity_vent_coeff']
-    T_low  = params['temp_min_comfort_threshold']
+    T_low  = params['temp_min_comfort_threshold'] + 0.01
     T_OK = params['temp_OK_threshold']
     T_high = params['temp_max_comfort_threshold']
     H_high = params['humidity_threshold']
@@ -243,14 +245,23 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
     solver = pyo.SolverFactory('gurobi', solver_io='python')
     solver.options['TimeLimit'] = time_limit
     solver.options['OutputFlag'] = 0
+    solver.options['MIPGap'] = 0  # Don't stop early; let TimeLimit govern
     result = solver.solve(model, tee=False)
+
+    optimal = (result.solver.termination_condition == pyo.TerminationCondition.optimal)
+    try:
+        ub = result.problem[0].upper_bound
+        lb = result.problem[0].lower_bound
+        mip_gap = (ub - lb) / max(abs(ub), 1e-10) if ub != 0 else 0.0
+    except (IndexError, TypeError):
+        mip_gap = 0.0 if optimal else None
 
     # Extract the here-and-now decisions from the root node (node 0)
     hp1  = float(pyo.value(model.p[1, 0]))
     hp2  = float(pyo.value(model.p[2, 0]))
     vent = int(pyo.value(model.v[0]))
 
-    return hp1, hp2, vent
+    return hp1, hp2, vent, optimal, mip_gap
 
 def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
     t_start = time.time()
@@ -259,7 +270,10 @@ def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
     n_constraints = len(nodes) + len(scenarios) * L
     BUFFER = 0.2 + 0.0003 * n_constraints
     solve_time = max(total_budget - tree_time - BUFFER, 0.5)
-    hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios, time_limit=solve_time)
+    hp1, hp2, vent, optimal, mip_gap = build_and_solve_sp(params, state, nodes, scenarios, time_limit=solve_time)
+
+    last_solve_info['optimal'] = optimal
+    last_solve_info['mip_gap'] = mip_gap if mip_gap is not None else 0.0
 
     HereAndNowActions = {
         "HeatPowerRoom1" : hp1,
