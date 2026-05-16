@@ -467,6 +467,15 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
 #  Since θ_10, θ_11 > 0 (being cold costs more in the future), the minimiser
 #  will automatically set z_r = max(0, T_low − T_r_next) / 5. ✓
 
+def _get_solver():
+    """Return the first available MILP solver (Gurobi → HiGHS → CBC → GLPK)."""
+    for name in ('gurobi', 'highs', 'cbc', 'glpk'):
+        s = pyo.SolverFactory(name)
+        if s.available():
+            return s
+    raise RuntimeError("No MILP solver found. Install Gurobi, HiGHS, CBC, or GLPK.")
+
+
 def _solve_lookahead_MILP(state, theta_next):
     """
     Solve the 1-step lookahead MILP for the current state.
@@ -603,7 +612,7 @@ def _solve_lookahead_MILP(state, theta_next):
         m.p2_lo = pyo.Constraint(expr = m.p2 == d['heating_max_power'])
 
     # ── Solve ──────────────────────────────────────────────────────────────
-    solver = pyo.SolverFactory('gurobi')
+    solver = _get_solver()
     result = solver.solve(m, tee=False)
 
     ok = (result.solver.termination_condition
