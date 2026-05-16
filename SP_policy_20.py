@@ -257,7 +257,7 @@ def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
     nodes, scenarios = generate_scenario_tree(state, L=L, branching=branching, n_samples=n_samples)
     tree_time = time.time() - t_start
     n_constraints = len(nodes) + len(scenarios) * L
-    BUFFER = 0.1 + 0.0003 * n_constraints
+    BUFFER = 0.2 + 0.0003 * n_constraints
     solve_time = max(total_budget - tree_time - BUFFER, 0.5)
     hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios, time_limit=solve_time)
 
