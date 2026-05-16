@@ -298,8 +298,8 @@ def apply_dynamics(state, decision, occupancy1, occupancy2, price):
         - FIXED_DATA["humidity_vent_coeff"] * decision['VentilationON']
     next_state["price_previous"] = state['price_t']
     next_state["vent_counter"] = state['vent_counter'] + 1 if decision['VentilationON'] == 1 else 0
-    next_state["low_override_r1"] = 1 if next_state['T1'] < FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r1'] == 1 and next_state['T1'] < FIXED_DATA["temp_OK_threshold"]) else 0
-    next_state["low_override_r2"] = 1 if next_state['T2'] < FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r2'] == 1 and next_state['T2'] < FIXED_DATA["temp_OK_threshold"]) else 0
+    next_state["low_override_r1"] = 1 if next_state['T1'] <= FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r1'] == 1 and next_state['T1'] < FIXED_DATA["temp_OK_threshold"]) else 0
+    next_state["low_override_r2"] = 1 if next_state['T2'] <= FIXED_DATA["temp_min_comfort_threshold"] or (state['low_override_r2'] == 1 and next_state['T2'] < FIXED_DATA["temp_OK_threshold"]) else 0
     return next_state
 
 
