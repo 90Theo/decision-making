@@ -66,8 +66,13 @@ N_SCENARIOS  = 200
 N_ITER       = 5
 RIDGE_ALPHA  = 1e-2
 
-# NEW: multi-stage lookahead depth
-LOOKAHEAD_STEPS = 3   # L — how many stages to optimise explicitly
+
+
+
+# multi-stage lookahead depth
+LOOKAHEAD_STEPS = 5   
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════
