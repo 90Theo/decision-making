@@ -14,7 +14,7 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 params = SystemCharacteristics.get_fixed_data()
 
-def generate_scenario_tree(state, L=6, branching=3, n_samples=30):
+def generate_scenario_tree(state, L=6, branching=3, n_samples=50):
     t0 = state["current_time"]
     L = min(L, params['num_timeslots'] - t0)
     # First we make the root node
