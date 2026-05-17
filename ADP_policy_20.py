@@ -1,10 +1,10 @@
 
 #  Task 4 (v2): Multi-Stage Approximate Dynamic Programming
 #
-#  ARCHITECTURE OVERVIEW
+#  ADP ARCHITECTURE OVERVIEW
 #  ─────────────────────
-#  This file extends the single-stage ADP to a MULTI-STAGE deployment MILP.
-#  The value function approximation (VFA) and training are identical to v1:
+#  MULTI-STAGE deployment MILP.
+#  The value function approximation (VFA) and training
 #
 #    V̂_t(s ; θ_t) = θ_t ᵀ φ(s)      [linear in weights θ, nonlinear in s OK]
 
@@ -30,10 +30,7 @@
 #  values at each future stage — the same certainty-equivalent approach
 #  used in the 1-step version, just extended over more steps.
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# Imports
-# ═══════════════════════════════════════════════════════════════════════
+# imports
 import os
 import sys
 import numpy as np
@@ -82,7 +79,7 @@ EPSILON_TEMP = 0.5   # °C buffer above T_LOW
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# SECTION 2 — FEATURE FUNCTION  φ(s)   [identical to v1]
+# SECTION 2 — FEATURE FUNCTION  φ(s) 
 
 
 def compute_features(state):
@@ -123,7 +120,7 @@ def compute_features(state):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# SECTION 3 — STOCHASTIC PROCESS MODELS   [identical to v1]
+# SECTION 3 — STOCHASTIC PROCESS MODELS
 # ═══════════════════════════════════════════════════════════════════════
 
 def _sample_next_price(price_t, price_prev):
@@ -164,7 +161,7 @@ def _expected_next_occupancy(occ1, occ2):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# SECTION 4 — SYSTEM DYNAMICS   [identical to v1, used in training]
+# SECTION 4 — SYSTEM DYNAMICS  
 # ═══════════════════════════════════════════════════════════════════════
 
 def _apply_overrule(state, action):
@@ -258,7 +255,7 @@ def _greedy_action(state):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# SECTION 5 — TRAINING   [identical to v1]
+# SECTION 5 — TRAINING  
 # ═══════════════════════════════════════════════════════════════════════
 
 #  Forward-backward approximate backward induction.
