@@ -7,7 +7,7 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 
 NUM_LOOKAHEADS = 10
-NUM_TRAJECORIES = 50
+NUM_TRAJECORIES = 200
 EPSILON = 0.001
 
 
@@ -249,6 +249,3 @@ def select_action(state):
     data = get_fixed_data()
     HereAndNowActions = lookahead_policy(state, data, lookaheads=NUM_LOOKAHEADS)
     return HereAndNowActions
-
-
-print(EPSILON)
