@@ -16,9 +16,11 @@ params = SystemCharacteristics.get_fixed_data()
 
 EPSILON = 0.01
 
-def generate_scenario_tree(state, L=6, branching=3, n_samples=50):
+
+def generate_scenario_tree(state, L=4, branching=4, n_samples=50):
     t0 = state["current_time"]
-    L = min(L, params['num_timeslots'] - t0)
+    L_cutoff = L
+    L = params['num_timeslots'] - t0
     # First we make the root node
     nodes = [{
         'id': 0,
@@ -39,40 +41,70 @@ def generate_scenario_tree(state, L=6, branching=3, n_samples=50):
     for stage in range(1, L):
         stage_nodes[stage] = []
 
-        for parent_id in stage_nodes[stage - 1]:
-            parent = nodes[parent_id]
+        if stage > L_cutoff:
+            for parent_id in stage_nodes[stage - 1]:
+                parent = nodes[parent_id]
 
-            # Draw n_samples possible next states from the given stochastic processes
-            samples = []
-            for _ in range(n_samples):
-                p_next = price_model(parent['price'], parent['price_prev'])
-                o1, o2 = next_occupancy_levels(parent['occ1'], parent['occ2'])
-                samples.append([p_next, o1, o2])
-            samples = np.array(samples)
+                # Draw n_samples possible next states from the given stochastic processes
+                samples = []
+                for _ in range(n_samples):
+                    p_next = price_model(parent['price'], parent['price_prev'])
+                    o1, o2 = next_occupancy_levels(parent['occ1'], parent['occ2'])
+                    samples.append([p_next, o1, o2])
+                samples = np.array(samples)
 
-            # Cluster samples into representative points. Argument branching decides how many points to cluster to
-            n_clust = branching
-            km = KMeans(n_clusters=n_clust, n_init=5, random_state=20) # random_state=20 because we are group 20 :)
-            labels = km.fit_predict(samples)
-            centroids = km.cluster_centers_
-            counts = np.bincount(labels, minlength=n_clust)
-            cprobs = counts / counts.sum()
-
-            # Create one child node per cluster
-            for k in range(len(centroids)):
+                # Add node with averages
+                    
                 nodes.append({
                     'id': node_counter,
                     'stage': stage,
                     'parent': parent_id,
-                    'prob': parent['prob'] * cprobs[k],
-                    'price': float(centroids[k][0]),
+                    'prob': parent['prob'],
+                    'price': float(np.average(samples[:, 0])),
                     'price_prev': parent['price'],
-                    'occ1': float(centroids[k][1]),
-                    'occ2': float(centroids[k][2]),
+                    'occ1': float(np.average(samples[:, 1])),
+                    'occ2': float(np.average(samples[:, 2])),
                     'time': t0 + stage
                 })
                 stage_nodes[stage].append(node_counter)
                 node_counter += 1
+
+
+        else:
+            for parent_id in stage_nodes[stage - 1]:
+                parent = nodes[parent_id]
+
+                # Draw n_samples possible next states from the given stochastic processes
+                samples = []
+                for _ in range(n_samples):
+                    p_next = price_model(parent['price'], parent['price_prev'])
+                    o1, o2 = next_occupancy_levels(parent['occ1'], parent['occ2'])
+                    samples.append([p_next, o1, o2])
+                samples = np.array(samples)
+
+                # Cluster samples into representative points. Argument branching decides how many points to cluster to
+                n_clust = branching
+                km = KMeans(n_clusters=n_clust, n_init=5, random_state=20) # random_state=20 because we are group 20 :)
+                labels = km.fit_predict(samples)
+                centroids = km.cluster_centers_
+                counts = np.bincount(labels, minlength=n_clust)
+                cprobs = counts / counts.sum()
+
+                # Create one child node per cluster
+                for k in range(len(centroids)):
+                    nodes.append({
+                        'id': node_counter,
+                        'stage': stage,
+                        'parent': parent_id,
+                        'prob': parent['prob'] * cprobs[k],
+                        'price': float(centroids[k][0]),
+                        'price_prev': parent['price'],
+                        'occ1': float(centroids[k][1]),
+                        'occ2': float(centroids[k][2]),
+                        'time': t0 + stage
+                    })
+                    stage_nodes[stage].append(node_counter)
+                    node_counter += 1
 
     # Build scenario paths: walk from each leaf back to root, then reverse
     leaf_ids = stage_nodes[L - 1]
@@ -109,7 +141,7 @@ def build_sp(params, state, nodes, scenarios):
     z_occ = params['heat_occupancy_coeff']
     e_occ = params['humidity_occupancy_coeff']
     e_vent = params['humidity_vent_coeff']
-    T_low  = params['temp_min_comfort_threshold'] + EPSILON
+    T_low  = params['temp_min_comfort_threshold'] + 0.01
     T_OK = params['temp_OK_threshold']
     T_high = params['temp_max_comfort_threshold']
     H_high = params['humidity_threshold']
@@ -260,7 +292,7 @@ def solve_sp(model, time_limit):
 
     return hp1, hp2, vent
 
-def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
+def select_action(state, total_budget=7.0, L=6, branching=2, n_samples=30):
     t_start = time.time()
     nodes, scenarios = generate_scenario_tree(state, L=L, branching=branching, n_samples=n_samples)
     tree_time = time.time() - t_start
@@ -269,10 +301,9 @@ def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
     #solve_time = max(total_budget - tree_time - BUFFER, 0.5)
     BUFFER = 0.5
     model = build_sp(params, state, nodes, scenarios)
-    solve_time = total_budget - (time.time() - t_start) - BUFFER
+    solve_time = total_budget - time.time() - t_start - BUFFER
     hp1, hp2, vent = solve_sp(model, time_limit=solve_time)
     print("tree: ", tree_time, ", solve time: ", solve_time)
-
     HereAndNowActions = {
         "HeatPowerRoom1" : hp1,
         "HeatPowerRoom2" : hp2,
