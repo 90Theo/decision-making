@@ -355,6 +355,10 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
             A             = Phi.T @ Phi + ridge * np.eye(N_FEATURES)
             b             = Phi.T @ y
             theta_list[t] = np.linalg.solve(A, b)
+            # Coldness features use z >= max(0,...) relaxation — only valid
+            # when coefficients are nonnegative (otherwise solver inflates z).
+            theta_list[t][10] = max(0.0, theta_list[t][10])
+            theta_list[t][11] = max(0.0, theta_list[t][11])
 
         if verbose:
             s_ref = _make_initial_state([4.0]*T_SLOTS,
@@ -388,9 +392,6 @@ else:
 # Policy entry point
 def select_action(state):
     t = int(state['current_time'])
-    if t >= T_SLOTS - 1:
-        return {'HeatPowerRoom1': 0.0, 'HeatPowerRoom2': 0.0, 'VentilationON': 0}
-
-    theta_next = _THETA_LIST[t + 1]
+    theta_next = _THETA_LIST[t + 1] if t + 1 < T_SLOTS else np.zeros(N_FEATURES)
     action, _ = _solve_MILP(state, theta_next)
     return action
