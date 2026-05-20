@@ -20,7 +20,6 @@ N_FEATURES     = 12
 N_SCENARIOS    = 2000
 N_ITER         = 5
 RIDGE_ALPHA    = 1e-2
-EPSILON_TEMP   = 0.01  # °C buffer above T_LOW inside the MILP
 N_VFA_SAMPLES  = 50    # K samples for averaging VFA over stochastic outcomes
 
 
@@ -168,7 +167,7 @@ def _solve_MILP(state, theta_next):
     lo_r1     = int(state['low_override_r1'])
     lo_r2     = int(state['low_override_r2'])
     T_out_t   = float(d['outdoor_temperature'][t])
-    T_LOW     = float(d['temp_min_comfort_threshold']) + EPSILON_TEMP
+    T_LOW     = float(d['temp_min_comfort_threshold']) + 0.01
 
     # Sample K stochastic outcomes w_{k,t+1} (course slide compliance)
     K = N_VFA_SAMPLES
