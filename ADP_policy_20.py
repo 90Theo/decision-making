@@ -17,7 +17,7 @@ PARAMS   = get_fixed_data()
 T_SLOTS  = int(PARAMS['num_timeslots'])
 
 N_FEATURES     = 14
-N_SCENARIOS    = 2000
+N_SCENARIOS    = 20
 N_ITER         = 5
 RIDGE_ALPHA    = 1e-2
 N_VFA_SAMPLES  = 50    # K samples for averaging VFA over stochastic outcomes
@@ -200,7 +200,7 @@ def _solve_MILP(state, theta_next):
     m.T1_next = pyo.Var(within=pyo.Reals)
     m.T2_next = pyo.Var(within=pyo.Reals)
     m.H_next  = pyo.Var(within=pyo.Reals)
-    M_BIG     = 1.0
+    M_BIG     = 10.0
     m.z1      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, M_BIG))
     m.z2      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, M_BIG))
     m.b1      = pyo.Var(domain=pyo.Binary)
