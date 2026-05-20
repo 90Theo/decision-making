@@ -14,14 +14,14 @@ FIXED_DATA = get_fixed_data()
 
 
 policies = [
-    "Hindsight_policy_20",
+    #"Hindsight_policy_20",
     #"Dummy_policy_20",
-    "Lookahead_policy_20",
+    #"Lookahead_policy_20",
     #"SP2Stage_policy_20",
     #'Hybrid_ADP_policy_20',
     "Hybrid_policy_Fabian",
     # "OLD_multi_ADP_policy_20",
-    "SP_policy_20",
+    #"SP_policy_20",
     #"SP_Price_LA_Occ_policy_20",
     #"ADP_policy_20",
     #"SP_Lookahead_policy_20",
@@ -53,7 +53,7 @@ for i, policy in enumerate(policies):
     master_results[policy] = results
     avg_cost = np.mean([r['cost_total'] for r in master_results[policy]])
     end_time = time.time()
-    end_string = f"Average daily cost over {len(results)} days: {avg_cost:.2f} € ({(avg_cost/optimal-1)*100:.2f} % over optimal) after {end_time - start_time:.2f} seconds\n"
+    end_string = f"Average daily cost over {len(results)} days for policy {policy}: {avg_cost:.2f} € ({(avg_cost/optimal-1)*100:.2f} % over optimal) after {end_time - start_time:.2f} seconds\n"
     end_strings.append(end_string)
     print(end_string)
 
