@@ -16,11 +16,12 @@ if _DIR not in sys.path:
 PARAMS   = get_fixed_data()
 T_SLOTS  = int(PARAMS['num_timeslots'])
 
-N_FEATURES   = 12
-N_SCENARIOS  = 2000
-N_ITER       = 5
-RIDGE_ALPHA  = 1e-2
-EPSILON_TEMP = 0.01  # °C buffer above T_LOW inside the MILP
+N_FEATURES     = 12
+N_SCENARIOS    = 2000
+N_ITER         = 5
+RIDGE_ALPHA    = 1e-2
+EPSILON_TEMP   = 0.01  # °C buffer above T_LOW inside the MILP
+N_VFA_SAMPLES  = 50    # K samples for averaging VFA over stochastic outcomes
 
 
 # Feature function φ(s) ∈ ℝ¹²
@@ -55,15 +56,6 @@ def _sample_next_price(price_t, price_prev):
     return float(np.clip(next_p, 0.0, 12.0))
 
 
-def _expected_next_price(price_t, price_prev):
-    mean_price         = 4.0
-    reversion_strength = 0.12
-    exp_p = (price_t
-             + 0.6 * (price_t - price_prev)
-             + reversion_strength * (mean_price - price_t))
-    return float(np.clip(exp_p, 0.0, 12.0))
-
-
 def _sample_next_occupancy(occ1, occ2):
     mean_r1, mean_r2 = 35.0, 25.0
     rev, coupling    = 0.25, 0.10
@@ -71,13 +63,6 @@ def _sample_next_occupancy(occ1, occ2):
     r2 = occ2 + rev*(mean_r2-occ2) + coupling*(occ1-occ2) + np.random.normal(0, 2.5)
     return float(np.clip(r1, 20, 50)), float(np.clip(r2, 10, 30))
 
-
-def _expected_next_occupancy(occ1, occ2):
-    mean_r1, mean_r2 = 35.0, 25.0
-    rev, coupling    = 0.25, 0.10
-    r1 = occ1 + rev*(mean_r1-occ1) + coupling*(occ2-occ1)
-    r2 = occ2 + rev*(mean_r2-occ2) + coupling*(occ1-occ2)
-    return float(np.clip(r1, 20, 50)), float(np.clip(r2, 10, 30))
 
 
 # System dynamics
@@ -170,7 +155,7 @@ def _greedy_action(state):
                                    'VentilationON':  v})
 
 
-# MILP: min c_t(a) + θ_{t+1}ᵀ φ(s_{t+1})
+# MILP: min c_t(a) + (1/K) Σ_k θ_{t+1}ᵀ φ(s_{t+1}^k)
 def _get_solver():
     for name in ('gurobi', 'highs', 'cbc', 'glpk'):
         s = pyo.SolverFactory(name)
@@ -193,10 +178,15 @@ def _solve_MILP(state, theta_next):
     lo_r1     = int(state['low_override_r1'])
     lo_r2     = int(state['low_override_r2'])
     T_out_t   = float(d['outdoor_temperature'][t])
-    T_LOW     = float(d['temp_min_comfort_threshold']) + EPSILON_TEMP
+    T_LOW     = float(d['temp_min_comfort_threshold']) + 0.01
 
-    lam_next_exp                   = _expected_next_price(lam, lam_prev)
-    occ1_next_exp, occ2_next_exp   = _expected_next_occupancy(Occ1, Occ2)
+    sampled_prices = [_sample_next_price(lam, lam_prev)
+                      for _ in range(N_VFA_SAMPLES)]
+    sampled_occs   = [_sample_next_occupancy(Occ1, Occ2)
+                      for _ in range(N_VFA_SAMPLES)]
+    lam_next_exp   = float(np.mean(sampled_prices))
+    occ1_next_exp  = float(np.mean([o[0] for o in sampled_occs]))
+    occ2_next_exp  = float(np.mean([o[1] for o in sampled_occs]))
 
     a  = d['heat_exchange_coeff']
     b_ = d['thermal_loss_coeff']
@@ -269,14 +259,14 @@ def _solve_MILP(state, theta_next):
     solver = _get_solver()
     result = solver.solve(m, tee=False)
     ok = (result.solver.termination_condition == pyo.TerminationCondition.optimal)
-    if not ok:
-        return _greedy_action(state)
+    assert ok, "1-step MILP failed to solve — should not happen."
 
-    return {
+    act = {
         'HeatPowerRoom1': float(np.clip(pyo.value(m.p1), 0.0, d['heating_max_power'])),
         'HeatPowerRoom2': float(np.clip(pyo.value(m.p2), 0.0, d['heating_max_power'])),
         'VentilationON':  int(round(float(pyo.value(m.v)))),
     }
+    return act, float(pyo.value(m.obj))
 
 
 # Training: forward-backward approximate backward induction
@@ -340,7 +330,7 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
                 else:
                     theta_next = theta_list[t + 1] if t + 1 < T_SLOTS \
                                  else np.zeros(N_FEATURES)
-                    action = _solve_MILP(state, theta_next)
+                    action, _ = _solve_MILP(state, theta_next)
                     action = _apply_overrule(state, action)
 
                 occ1_next  = occ1s[t + 1]  if t + 1 < T_SLOTS else occ1s[-1]
@@ -358,15 +348,13 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
             Phi = np.zeros((n_scenarios, N_FEATURES))
             y   = np.zeros(n_scenarios)
 
-            for j, traj in enumerate(trajectories):
-                state_t, _, cost_t, state_t1 = traj[t]
-                Phi[j] = compute_features(state_t)
+            theta_next_bp = theta_list[t + 1] if t + 1 < T_SLOTS \
+                            else np.zeros(N_FEATURES)
 
-                if t == T_SLOTS - 1:
-                    y[j] = cost_t
-                else:
-                    V_next = theta_list[t + 1] @ compute_features(state_t1)
-                    y[j]   = cost_t + V_next
+            for j, traj in enumerate(trajectories):
+                state_t = traj[t][0]
+                Phi[j]  = compute_features(state_t)
+                _, y[j] = _solve_MILP(state_t, theta_next_bp)
 
             A             = Phi.T @ Phi + ridge * np.eye(N_FEATURES)
             b             = Phi.T @ y
@@ -408,4 +396,5 @@ def select_action(state):
         return {'HeatPowerRoom1': 0.0, 'HeatPowerRoom2': 0.0, 'VentilationON': 0}
 
     theta_next = _THETA_LIST[t + 1]
-    return _solve_MILP(state, theta_next)
+    action, _ = _solve_MILP(state, theta_next)
+    return action
