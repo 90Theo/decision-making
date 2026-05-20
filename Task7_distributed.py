@@ -84,7 +84,7 @@ def solve_centralized_model(occ_r1_arr, occ_r2_arr):
 
     return model, {'T_avg': T_avg, 'p_total': p_total, 'times': times, 'stores': stores, 'obj': pyo.value(model.obj)}
 
-
+# This plotting function was created using Claude   
 def plot_centralized_visulizations(results):
     T_avg   = results['T_avg']
     p_total = results['p_total']
@@ -265,6 +265,8 @@ def optimize_lambda_adaptive(occ_r1_arr, occ_r2_arr, alpha_zero, iterations):
     res['lams_values'] = lams_values
     return res
 
+
+# This plotting function was created using Claude
 def plot_results(all_res, optimal):
     # below the dict keys of  each list element
     # all_res['alpha'] -> alpha value used for computation saved as string, adaptive step is saved as 'adaptive step'
@@ -376,7 +378,7 @@ def main():
     occ_r2_arr = occ.iloc[1, :10].to_list()
 
     _, results = solve_centralized_model(occ_r1_arr, occ_r2_arr)
-    # plot_centralized_visulizations(results)
+    plot_centralized_visulizations(results)
 
     #Now lets do the distributed algo
     iterations = 100

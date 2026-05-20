@@ -122,7 +122,7 @@ def get_fixed_data():
 
 
 DIR = Path(__file__).parent
-np.random.seed(20) # To be able to compare different runs, comment out if you want true randomness
+# np.random.seed(20) # To be able to compare different runs, comment out if you want true randomness
 FIXED_DATA = get_fixed_data()
 DUMMY_POLICY = "Dummy_policy_20"
 
@@ -209,7 +209,7 @@ def check_and_sanitize_action(select_action, state, dummy_action):
         elapsed = time.time() - t0
 
         # If policy is too slow → dummy
-        if elapsed > 7.0:
+        if elapsed > 15.0:
             print(f"[WARNING] Policy too slow ({elapsed:.2f}s). Using dummy action.")
             return dummy_action(state)
 
@@ -351,6 +351,7 @@ def evaluate_performance(policy_file=DUMMY_POLICY, days=100, file_price_data=DIR
 
 
     for day in range(days):
+        print('Day: ', day)
         price = price_data.iloc[day].values
         occupancy1 = occupancy1_data.iloc[day].values
         occupancy2 = occupancy2_data.iloc[day].values

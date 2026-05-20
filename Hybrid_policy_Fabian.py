@@ -2,25 +2,39 @@ import time
 import numpy as np
 import pyomo.environ as pyo
 from sklearn.cluster import KMeans
-
-import matplotlib
-
-# matplotlib.use('Agg')  # Needed because PriceProcessRestaurant.py calls plt.show() at import time
-# ^Now not needded because I commented out the matplot stuff from that file
-
-import SystemCharacteristics
+from SystemCharacteristics import get_fixed_data
 from PriceProcessRestaurant import price_model
 from OccupancyProcessRestaurant import next_occupancy_levels
 
-params = SystemCharacteristics.get_fixed_data()
+params = get_fixed_data()
 
-EPSILON = 0.01
+EPSILON = 0.001
+
+# Lookahgead for the SP parameters
+# each leftover time as an assignment
+# [Lookahead, branching, n_samples]
+MASTER_ASSIGNMENT = {
+    1:  [1, 20, 200],
+    2:  [2, 12, 100],
+    3:  [3,  7, 100],
+    4:  [4,  4,  50],
+    5:  [5,  3,  50],
+    6:  [6,  3,  30],
+    7:  [5,  3,  30],
+    8:  [5,  3,  30],
+    9:  [5,  3,  30],
+    10: [5,  3,  30]
+}
 
 
-def generate_scenario_tree(state, L=4, branching=4, n_samples=50):
+def generate_scenario_tree(state):
     t0 = state["current_time"]
-    L_cutoff = L
     L = params['num_timeslots'] - t0
+    L_cutoff = MASTER_ASSIGNMENT[L][0]
+    branching = MASTER_ASSIGNMENT[L][1]
+    n_samples = MASTER_ASSIGNMENT[L][2]
+    #print(f"Generating scenario tree with L={L}, L_cutoff={L_cutoff}, branching={branching}, n_samples={n_samples}")
+
     # First we make the root node
     nodes = [{
         'id': 0,
@@ -141,7 +155,7 @@ def build_sp(params, state, nodes, scenarios):
     z_occ = params['heat_occupancy_coeff']
     e_occ = params['humidity_occupancy_coeff']
     e_vent = params['humidity_vent_coeff']
-    T_low  = params['temp_min_comfort_threshold'] + 0.01
+    T_low  = params['temp_min_comfort_threshold']
     T_OK = params['temp_OK_threshold']
     T_high = params['temp_max_comfort_threshold']
     H_high = params['humidity_threshold']
@@ -252,8 +266,8 @@ def build_sp(params, state, nodes, scenarios):
         for r in rooms:
             model.cons.add(model.T[r, n_id] >= T_high - M_T * (1 - model.yHigh[r, n_id])) # If T < T_high yHigh is forced to 0
             model.cons.add(model.T[r, n_id] <= T_high + M_T * model.yHigh[r, n_id]) # If T > T_high yHigh is forced to 1
-            model.cons.add(model.T[r, n_id] <= T_low + M_T * (1 - model.yLow[r, n_id])) # If T > T_low yLow is forced to 0
-            model.cons.add(model.T[r, n_id] >= T_low - M_T * model.yLow[r, n_id]) # If T < T_low yLow is forced to 1
+            model.cons.add(model.T[r, n_id] <= (T_low + EPSILON) + M_T * (1 - model.yLow[r, n_id])) # If T > T_low yLow is forced to 0
+            model.cons.add(model.T[r, n_id] >= (T_low + EPSILON) - M_T * model.yLow[r, n_id]) # If T < T_low yLow is forced to 1
             model.cons.add(model.T[r, n_id] >= T_OK - M_T * (1 - model.yOK[r, n_id])) # If T < T_OK yOK is forcced to 0
             model.cons.add(model.T[r, n_id] <= T_OK + M_T * model.yOK[r, n_id]) # If T > T_OK yOK is forced to 1
 
@@ -292,18 +306,16 @@ def solve_sp(model, time_limit):
 
     return hp1, hp2, vent
 
-def select_action(state, total_budget=7.0, L=6, branching=2, n_samples=30):
+def select_action(state):
     t_start = time.time()
-    nodes, scenarios = generate_scenario_tree(state, L=L, branching=branching, n_samples=n_samples)
+    total_budget=8.0
+    nodes, scenarios = generate_scenario_tree(state)
     tree_time = time.time() - t_start
-    n_constraints = len(nodes) + len(scenarios) * L
-    #BUFFER = 0.2 + 0.0003 * n_constraints
-    #solve_time = max(total_budget - tree_time - BUFFER, 0.5)
     BUFFER = 0.5
     model = build_sp(params, state, nodes, scenarios)
-    solve_time = total_budget - time.time() - t_start - BUFFER
+    solve_time = max(0.5, total_budget - (time.time() - t_start) - BUFFER)
+    #print("tree: ", tree_time, ", solve time: ", solve_time)
     hp1, hp2, vent = solve_sp(model, time_limit=solve_time)
-    print("tree: ", tree_time, ", solve time: ", solve_time)
     HereAndNowActions = {
         "HeatPowerRoom1" : hp1,
         "HeatPowerRoom2" : hp2,

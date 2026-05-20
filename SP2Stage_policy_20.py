@@ -2,21 +2,17 @@ import time
 import numpy as np
 import pyomo.environ as pyo
 from sklearn.cluster import KMeans
-
-import matplotlib
-
-# matplotlib.use('Agg')  # Needed because PriceProcessRestaurant.py calls plt.show() at import time
-# ^Now not needded because I commented out the matplot stuff from that file
-
-import SystemCharacteristics
+from SystemCharacteristics import get_fixed_data
 from PriceProcessRestaurant import price_model
 from OccupancyProcessRestaurant import next_occupancy_levels
 
-params = SystemCharacteristics.get_fixed_data()
+params = get_fixed_data()
 
-def generate_scenario_tree(state, branching=3, n_samples=30):
+EPSILON = 0.001
+
+def generate_scenario_tree(state, L=6, branching=3, n_samples=50):
     t0 = state["current_time"]
-    L = min(2, params['num_timeslots'] - t0)
+    L = min(L, params['num_timeslots'] - t0)
     # First we make the root node
     nodes = [{
         'id': 0,
@@ -87,7 +83,7 @@ def generate_scenario_tree(state, branching=3, n_samples=30):
         scenarios.append(path)
     return nodes, scenarios
 
-def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
+def build_sp(params, state, nodes, scenarios):
     model = pyo.ConcreteModel()
 
     # We make a list with each set: The rooms and the nodes. This will make it easy to loop thorugh them later
@@ -107,7 +103,7 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
     z_occ = params['heat_occupancy_coeff']
     e_occ = params['humidity_occupancy_coeff']
     e_vent = params['humidity_vent_coeff']
-    T_low  = params['temp_min_comfort_threshold'] + 0.01
+    T_low  = params['temp_min_comfort_threshold']
     T_OK = params['temp_OK_threshold']
     T_high = params['temp_max_comfort_threshold']
     H_high = params['humidity_threshold']
@@ -117,7 +113,7 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
 
     # Big-M constants
     M_T = 50.0 # This one is for temperature so 50 C° seems safe
-    M_H = 100.0 # This is for humidity so 200% should be completely safe
+    M_H = 100.0 # This is for humidity so 100% should be safe
 
     # Decision variables
     model.p = pyo.Var(model.R, model.N, domain=pyo.NonNegativeReals, bounds=(0, P_max)) # heating power
@@ -218,8 +214,8 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
         for r in rooms:
             model.cons.add(model.T[r, n_id] >= T_high - M_T * (1 - model.yHigh[r, n_id])) # If T < T_high yHigh is forced to 0
             model.cons.add(model.T[r, n_id] <= T_high + M_T * model.yHigh[r, n_id]) # If T > T_high yHigh is forced to 1
-            model.cons.add(model.T[r, n_id] <= T_low + M_T * (1 - model.yLow[r, n_id])) # If T > T_low yLow is forced to 0
-            model.cons.add(model.T[r, n_id] >= T_low - M_T * model.yLow[r, n_id]) # If T < T_low yLow is forced to 1
+            model.cons.add(model.T[r, n_id] <= (T_low + EPSILON) + M_T * (1 - model.yLow[r, n_id])) # If T > T_low yLow is forced to 0
+            model.cons.add(model.T[r, n_id] >= (T_low + EPSILON) - M_T * model.yLow[r, n_id]) # If T < T_low yLow is forced to 1
             model.cons.add(model.T[r, n_id] >= T_OK - M_T * (1 - model.yOK[r, n_id])) # If T < T_OK yOK is forcced to 0
             model.cons.add(model.T[r, n_id] <= T_OK + M_T * model.yOK[r, n_id]) # If T > T_OK yOK is forced to 1
 
@@ -238,7 +234,13 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
             remaining = path[i:]
             n_ahead = min(U_vent, len(remaining))
             model.cons.add(sum(model.v[remaining[j]] for j in range(n_ahead))>= n_ahead * model.s[n_id])
+    
+    return model
+    
+    
 
+
+def solve_sp(model, time_limit):
     # Solve
     solver = pyo.SolverFactory('gurobi', solver_io='python')
     solver.options['TimeLimit'] = time_limit
@@ -252,13 +254,23 @@ def build_and_solve_sp(params, state, nodes, scenarios, time_limit=5.0):
 
     return hp1, hp2, vent
 
-def select_action(state, total_budget=7.0):
+def select_action(state):
     t_start = time.time()
-    nodes, scenarios = generate_scenario_tree(state)
+    total_budget=8.0
+    L=2
+    branching=20
+    n_samples=500
+
+    nodes, scenarios = generate_scenario_tree(state, L=L, branching=branching, n_samples=n_samples)
     tree_time = time.time() - t_start
-    BUFFER = 0.05 + 0.0007 * len(nodes) # Linear buffer for Pyomo-to-Gurobi serialization
-    solve_time = max(total_budget - tree_time - BUFFER, 0.5)
-    hp1, hp2, vent = build_and_solve_sp(params, state, nodes, scenarios, time_limit=solve_time)
+    n_constraints = len(nodes) + len(scenarios) * L
+    #BUFFER = 0.2 + 0.0003 * n_constraints
+    #solve_time = max(total_budget - tree_time - BUFFER, 0.5)
+    BUFFER = 0.5
+    model = build_sp(params, state, nodes, scenarios)
+    solve_time = max(0.5, total_budget - (time.time() - t_start) - BUFFER)
+    # print("tree: ", tree_time, ", solve time: ", solve_time)
+    hp1, hp2, vent = solve_sp(model, time_limit=solve_time)
 
     HereAndNowActions = {
         "HeatPowerRoom1" : hp1,

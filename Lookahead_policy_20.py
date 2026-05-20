@@ -7,7 +7,9 @@ from OccupancyProcessRestaurant import next_occupancy_levels
 
 
 NUM_LOOKAHEADS = 10
-NUM_TRAJECORIES = 100
+NUM_TRAJECORIES = 50
+EPSILON = 0.001
+
 
 def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     
@@ -42,7 +44,7 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     model.T_out = pyo.Param(model.T, initialize={t: data['outdoor_temperature'][t] for t in model.T})
     model.P_vent = pyo.Param(initialize=data['ventilation_power'])
     model.P = pyo.Param(model.R, initialize={r: data['heating_max_power'] for r in model.R})
-    model.T_low = pyo.Param(initialize=data['temp_min_comfort_threshold'] + 0.01)
+    model.T_low = pyo.Param(initialize=data['temp_min_comfort_threshold'])
     model.T_high = pyo.Param(initialize=data['temp_max_comfort_threshold'])
     model.T_OK = pyo.Param(initialize=data['temp_OK_threshold'])
     model.H_high = pyo.Param(initialize=data['humidity_threshold'])
@@ -107,7 +109,7 @@ def create_professor_model(price_arr, occ_r1_arr, occ_r2_arr, data):
     def low_temp_1(m, r, t):
         return m.T_in[r, t] <= m.T_low + m.M_temp * (1 - m.y_low[r, t])
     def low_temp_2(m, r, t):
-        return m.T_in[r, t] >= m.T_low - m.M_temp * m.y_low[r, t]
+        return m.T_in[r, t] >= m.T_low + EPSILON - m.M_temp * m.y_low[r, t]
     model.lo_1 = pyo.Constraint(model.R, model.T, rule=low_temp_1)
     model.lo_2 = pyo.Constraint(model.R, model.T, rule=low_temp_2)
 
@@ -247,3 +249,6 @@ def select_action(state):
     data = get_fixed_data()
     HereAndNowActions = lookahead_policy(state, data, lookaheads=NUM_LOOKAHEADS)
     return HereAndNowActions
+
+
+print(EPSILON)

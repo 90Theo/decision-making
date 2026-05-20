@@ -2,17 +2,11 @@ import time
 import numpy as np
 import pyomo.environ as pyo
 from sklearn.cluster import KMeans
-
-import matplotlib
-
-# matplotlib.use('Agg')  # Needed because PriceProcessRestaurant.py calls plt.show() at import time
-# ^Now not needded because I commented out the matplot stuff from that file
-
-import SystemCharacteristics
+from SystemCharacteristics import get_fixed_data
 from PriceProcessRestaurant import price_model
 from OccupancyProcessRestaurant import next_occupancy_levels
 
-params = SystemCharacteristics.get_fixed_data()
+params = get_fixed_data()
 
 EPSILON = 0.01
 
@@ -109,7 +103,7 @@ def build_sp(params, state, nodes, scenarios):
     z_occ = params['heat_occupancy_coeff']
     e_occ = params['humidity_occupancy_coeff']
     e_vent = params['humidity_vent_coeff']
-    T_low  = params['temp_min_comfort_threshold'] + EPSILON
+    T_low  = params['temp_min_comfort_threshold']
     T_OK = params['temp_OK_threshold']
     T_high = params['temp_max_comfort_threshold']
     H_high = params['humidity_threshold']
@@ -220,8 +214,8 @@ def build_sp(params, state, nodes, scenarios):
         for r in rooms:
             model.cons.add(model.T[r, n_id] >= T_high - M_T * (1 - model.yHigh[r, n_id])) # If T < T_high yHigh is forced to 0
             model.cons.add(model.T[r, n_id] <= T_high + M_T * model.yHigh[r, n_id]) # If T > T_high yHigh is forced to 1
-            model.cons.add(model.T[r, n_id] <= T_low + M_T * (1 - model.yLow[r, n_id])) # If T > T_low yLow is forced to 0
-            model.cons.add(model.T[r, n_id] >= T_low - M_T * model.yLow[r, n_id]) # If T < T_low yLow is forced to 1
+            model.cons.add(model.T[r, n_id] <= (T_low + EPSILON) + M_T * (1 - model.yLow[r, n_id])) # If T > T_low yLow is forced to 0
+            model.cons.add(model.T[r, n_id] >= (T_low + EPSILON) - M_T * model.yLow[r, n_id]) # If T < T_low yLow is forced to 1
             model.cons.add(model.T[r, n_id] >= T_OK - M_T * (1 - model.yOK[r, n_id])) # If T < T_OK yOK is forcced to 0
             model.cons.add(model.T[r, n_id] <= T_OK + M_T * model.yOK[r, n_id]) # If T > T_OK yOK is forced to 1
 
@@ -260,8 +254,13 @@ def solve_sp(model, time_limit):
 
     return hp1, hp2, vent
 
-def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
+def select_action(state):
     t_start = time.time()
+    total_budget=8.0
+    L=6
+    branching=3
+    n_samples=30
+
     nodes, scenarios = generate_scenario_tree(state, L=L, branching=branching, n_samples=n_samples)
     tree_time = time.time() - t_start
     n_constraints = len(nodes) + len(scenarios) * L
@@ -269,9 +268,9 @@ def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
     #solve_time = max(total_budget - tree_time - BUFFER, 0.5)
     BUFFER = 0.5
     model = build_sp(params, state, nodes, scenarios)
-    solve_time = total_budget - (time.time() - t_start) - BUFFER
-    hp1, hp2, vent = solve_sp(model, time_limit=solve_time)
+    solve_time = max(0.5, total_budget - (time.time() - t_start) - BUFFER)
     # print("tree: ", tree_time, ", solve time: ", solve_time)
+    hp1, hp2, vent = solve_sp(model, time_limit=solve_time)
 
     HereAndNowActions = {
         "HeatPowerRoom1" : hp1,
