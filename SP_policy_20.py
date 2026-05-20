@@ -271,7 +271,7 @@ def select_action(state, total_budget=7.0, L=6, branching=3, n_samples=30):
     model = build_sp(params, state, nodes, scenarios)
     solve_time = total_budget - (time.time() - t_start) - BUFFER
     hp1, hp2, vent = solve_sp(model, time_limit=solve_time)
-    print("tree: ", tree_time, ", solve time: ", solve_time)
+    # print("tree: ", tree_time, ", solve time: ", solve_time)
 
     HereAndNowActions = {
         "HeatPowerRoom1" : hp1,
