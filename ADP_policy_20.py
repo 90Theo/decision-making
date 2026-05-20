@@ -178,7 +178,7 @@ def _solve_MILP(state, theta_next):
     lo_r1     = int(state['low_override_r1'])
     lo_r2     = int(state['low_override_r2'])
     T_out_t   = float(d['outdoor_temperature'][t])
-    T_LOW     = float(d['temp_min_comfort_threshold']) + 0.01
+    T_LOW     = float(d['temp_min_comfort_threshold']) + EPSILON_TEMP
 
     sampled_prices = [_sample_next_price(lam, lam_prev)
                       for _ in range(N_VFA_SAMPLES)]
@@ -374,19 +374,19 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
 
 
 # Load pre-trained weights
-_WEIGHTS_CSV = os.path.join(_DIR, 'adp_weights_20.csv')
+_WEIGHTS_NPY = os.path.join(_DIR, 'adp_weights_20.npy')
 
-if os.path.exists(_WEIGHTS_CSV):
-    _theta_matrix = np.loadtxt(_WEIGHTS_CSV, delimiter=',', skiprows=0)
+if os.path.exists(_WEIGHTS_NPY):
+    _theta_matrix = np.load(_WEIGHTS_NPY)
     assert _theta_matrix.shape == (T_SLOTS, N_FEATURES), \
-        f"Weight CSV shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
+        f"Weight NPY shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
     _THETA_LIST = [_theta_matrix[t] for t in range(T_SLOTS)]
-    print(f"[ADP] Loaded pre-trained weights from {_WEIGHTS_CSV}")
+    print(f"[ADP] Loaded pre-trained weights from {_WEIGHTS_NPY}")
 else:
-    print(f"[ADP] WARNING: {_WEIGHTS_CSV} not found. Training from scratch…")
+    print(f"[ADP] WARNING: {_WEIGHTS_NPY} not found. Training from scratch…")
     _THETA_LIST = train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, verbose=True)
-    np.savetxt(_WEIGHTS_CSV, np.array(_THETA_LIST), delimiter=',')
-    print(f"[ADP] Saved weights to {_WEIGHTS_CSV}")
+    np.save(_WEIGHTS_NPY, np.array(_THETA_LIST))
+    print(f"[ADP] Saved weights to {_WEIGHTS_NPY}")
 
 
 # Policy entry point
