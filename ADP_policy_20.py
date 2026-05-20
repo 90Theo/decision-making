@@ -195,21 +195,28 @@ def _solve_MILP(state, theta_next):
     m.p2 = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, d['heating_max_power']))
     m.v  = pyo.Var(domain=pyo.Binary)
 
-    # Physical next-state variables defined once (endogenous state is deterministic given action)
-    _Z_MAX = 1.0
     m.T1_next = pyo.Var(within=pyo.Reals)
     m.T2_next = pyo.Var(within=pyo.Reals)
     m.H_next  = pyo.Var(within=pyo.Reals)
-    m.z1      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
-    m.z2      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
+    M_BIG     = 1.0
+    m.z1      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, M_BIG))
+    m.z2      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, M_BIG))
+    m.b1      = pyo.Var(domain=pyo.Binary)
+    m.b2      = pyo.Var(domain=pyo.Binary)
 
     # Deterministic transition: y_{t+1} = f(y_t, u_t)
     m.T1_dyn  = pyo.Constraint(expr=m.T1_next == T1_const + g*m.p1 - c_*m.v)
     m.T2_dyn  = pyo.Constraint(expr=m.T2_next == T2_const + g*m.p2 - c_*m.v)
     m.H_dyn   = pyo.Constraint(expr=m.H_next  == H_const  - hv*m.v)
 
-    m.z1_cold = pyo.Constraint(expr=m.z1 >= (T_LOW - m.T1_next) / 5.0)
-    m.z2_cold = pyo.Constraint(expr=m.z2 >= (T_LOW - m.T2_next) / 5.0)
+    # Exact max(0, (T_LOW - T_next)/5) via Big-M binary formulation
+    m.z1_lb  = pyo.Constraint(expr=m.z1 >= (T_LOW - m.T1_next) / 5.0)
+    m.z1_ub1 = pyo.Constraint(expr=m.z1 <= (T_LOW - m.T1_next) / 5.0 + M_BIG * (1 - m.b1))
+    m.z1_ub2 = pyo.Constraint(expr=m.z1 <= M_BIG * m.b1)
+
+    m.z2_lb  = pyo.Constraint(expr=m.z2 >= (T_LOW - m.T2_next) / 5.0)
+    m.z2_ub1 = pyo.Constraint(expr=m.z2 <= (T_LOW - m.T2_next) / 5.0 + M_BIG * (1 - m.b2))
+    m.z2_ub2 = pyo.Constraint(expr=m.z2 <= M_BIG * m.b2)
 
     # Objective: c_t(u) + (1/K) Σ_k V̂((y_{t+1}, w_{k,t+1}); θ_{t+1})
     m.Scenarios = pyo.RangeSet(0, K - 1)
@@ -354,10 +361,6 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
             A             = Phi.T @ Phi + ridge * np.eye(N_FEATURES)
             b             = Phi.T @ y
             theta_list[t] = np.linalg.solve(A, b)
-            # Coldness features use z >= max(0,...) relaxation — only valid
-            # when coefficients are nonnegative (otherwise solver inflates z).
-            theta_list[t][10] = max(0.0, theta_list[t][10])
-            theta_list[t][11] = max(0.0, theta_list[t][11])
 
         if verbose:
             s_ref = _make_initial_state([4.0]*T_SLOTS,
