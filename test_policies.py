@@ -7,19 +7,20 @@ import matplotlib.pyplot as plt
 from professor_model import evaluate_hindsight_model
 from SystemCharacteristics import get_fixed_data
 import time
+import pandas as pd
 
 FIXED_DATA = get_fixed_data()
 
 SAVE_PICS = True
 
 policies = [
-    "Hindsight_policy_20",
-    "Dummy_policy_20",
-    "Lookahead_policy_20",
-    "SP2Stage_policy_20",
+    #"Hindsight_policy_20",
+    #"Dummy_policy_20",
+    #"Lookahead_policy_20",
+    #"SP2Stage_policy_20",
     "SP_policy_20",
     #"ADP_policy_20",
-    "Hybrid_policy_Fabian"
+    # "Hybrid_policy_Fabian"
     ]
 
 master_results = {}
@@ -29,7 +30,7 @@ DIR = Path(os.getcwd())
 price_file = DIR / "PriceData.csv"
 occupancy1_file = DIR / "OccupancyRoom1.csv"
 occupancy2_file = DIR / "OccupancyRoom2.csv"
-num_days = 100
+num_days = 1
 optimal = 127.20
 end_strings = []
 
@@ -82,7 +83,7 @@ if SAVE_PICS == True:
         daily_costs = [res['cost_total'] for res in master_results[policy]]
         avg_cost = np.mean(daily_costs)
         label = pretty(policy)
-
+        pd.DataFrame({'daily_cost': daily_costs}).to_csv(output_dir / f"{policy}_costs.csv", index=False)
         ax = axes[0][i]
         ax.hist(daily_costs, bins=bin_edges, edgecolor='black')
         ax.axvline(avg_cost, color='red', linestyle='--', label=f'Mean: {avg_cost:.2f} €')
