@@ -4,6 +4,8 @@ import sys
 import numpy as np
 import pyomo.environ as pyo
 from SystemCharacteristics import get_fixed_data
+from PriceProcessRestaurant import price_model
+from OccupancyProcessRestaurant import next_occupancy_levels
 
 try:
     _DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,9 +18,9 @@ if _DIR not in sys.path:
 PARAMS   = get_fixed_data()
 T_SLOTS  = int(PARAMS['num_timeslots'])
 
-N_FEATURES     = 14
-N_SCENARIOS    = 20
-N_ITER         = 5
+N_FEATURES     = 12
+N_SCENARIOS    = 50
+N_ITER         = 20
 RIDGE_ALPHA    = 1e-2
 N_VFA_SAMPLES  = 50    # K samples for averaging VFA over stochastic outcomes
 
@@ -39,30 +41,7 @@ def compute_features(state):
         min(state['vent_counter'], 3) / 3.0,
         max(0.0, T_LOW - state['T1']) / 5.0,
         max(0.0, T_LOW - state['T2']) / 5.0,
-        state['low_override_r1'],
-        state['low_override_r2'],
     ], dtype=float)
-
-
-# Stochastic process models
-def _sample_next_price(price_t, price_prev):
-    mean_price         = 4.0
-    reversion_strength = 0.12
-    next_p = (price_t
-              + 0.6 * (price_t - price_prev)
-              + reversion_strength * (mean_price - price_t)
-              + np.random.normal(0, 0.5))
-    if next_p < 0 and np.random.rand() > 0.2:
-        next_p = np.random.uniform(0, mean_price * 0.3)
-    return float(np.clip(next_p, 0.0, 12.0))
-
-
-def _sample_next_occupancy(occ1, occ2):
-    mean_r1, mean_r2 = 35.0, 25.0
-    rev, coupling    = 0.25, 0.10
-    r1 = occ1 + rev*(mean_r1-occ1) + coupling*(occ2-occ1) + np.random.normal(0, 3.0)
-    r2 = occ2 + rev*(mean_r2-occ2) + coupling*(occ1-occ2) + np.random.normal(0, 2.5)
-    return float(np.clip(r1, 20, 50)), float(np.clip(r2, 10, 30))
 
 
 
@@ -147,12 +126,9 @@ def _step(state, action, occ1_next, occ2_next, price_next):
 
 
 # MILP: min c_t(a) + (1/K) Σ_k θ_{t+1}ᵀ φ(s_{t+1}^k)
-def _get_solver():
-    for name in ('gurobi', 'highs', 'cbc', 'glpk'):
-        s = pyo.SolverFactory(name)
-        if s.available():
-            return s
-    raise RuntimeError("No MILP solver found.")
+_SOLVER = pyo.SolverFactory('gurobi')
+if not _SOLVER.available():
+    raise RuntimeError("Gurobi solver not found. Install Gurobi and ensure it is on PATH.")
 
 
 def _solve_MILP(state, theta_next):
@@ -171,12 +147,11 @@ def _solve_MILP(state, theta_next):
     T_out_t   = float(d['outdoor_temperature'][t])
     T_LOW     = float(d['temp_min_comfort_threshold']) + 0.01
 
-    # Sample K stochastic outcomes w_{k,t+1} (course slide compliance)
     K = N_VFA_SAMPLES
     scenarios = []
     for _ in range(K):
-        price_k = _sample_next_price(lam, lam_prev)
-        occ1_k, occ2_k = _sample_next_occupancy(Occ1, Occ2)
+        price_k = price_model(lam, lam_prev)
+        occ1_k, occ2_k = next_occupancy_levels(Occ1, Occ2)
         scenarios.append((price_k, occ1_k, occ2_k))
 
     a  = d['heat_exchange_coeff']
@@ -255,15 +230,15 @@ def _solve_MILP(state, theta_next):
 
     if T1 > d['temp_max_comfort_threshold']:
         m.p1_hi = pyo.Constraint(expr = m.p1 == 0.0)
-    elif lo_r1 == 1:
+    elif lo_r1 == 1 or T1 <= d['temp_min_comfort_threshold']:
         m.p1_lo = pyo.Constraint(expr = m.p1 == d['heating_max_power'])
 
     if T2 > d['temp_max_comfort_threshold']:
         m.p2_hi = pyo.Constraint(expr = m.p2 == 0.0)
-    elif lo_r2 == 1:
+    elif lo_r2 == 1 or T2 <= d['temp_min_comfort_threshold']:
         m.p2_lo = pyo.Constraint(expr = m.p2 == d['heating_max_power'])
 
-    solver = _get_solver()
+    solver = _SOLVER
     result = solver.solve(m, tee=False)
     ok = (result.solver.termination_condition == pyo.TerminationCondition.optimal)
     assert ok, "1-step MILP failed to solve — should not happen."
@@ -277,41 +252,18 @@ def _solve_MILP(state, theta_next):
 
 
 # Training: forward-backward approximate backward induction
-def _sample_training_day():
-    price0 = np.random.uniform(2.0, 8.0)
-    occ10  = np.random.uniform(25.0, 35.0)
-    occ20  = np.random.uniform(15.0, 25.0)
-
-    prices = [price0]
-    occ1s  = [occ10]
-    occ2s  = [occ20]
-
-    for _ in range(T_SLOTS - 1):
-        p_prev = prices[-2] if len(prices) > 1 else 6.0
-        prices.append(_sample_next_price(prices[-1], p_prev))
-        o1, o2 = _sample_next_occupancy(occ1s[-1], occ2s[-1])
-        occ1s.append(o1)
-        occ2s.append(o2)
-
-    return prices, occ1s, occ2s
-
-
-def _make_initial_state(prices, occ1s, occ2s):
-    d = PARAMS
-    T1_init = np.random.uniform(16.0, 24.0)
-    T2_init = np.random.uniform(16.0, 24.0)
-    H_init  = np.random.uniform(30.0, 60.0)
+def _sample_initial_state():
     return {
-        'T1':             T1_init,
-        'T2':             T2_init,
-        'H':              H_init,
-        'Occ1':           occ1s[0],
-        'Occ2':           occ2s[0],
-        'price_t':        prices[0],
-        'price_previous': 4.0,
+        'T1':             21.0,
+        'T2':             21.0,
+        'H':              40.0,
+        'Occ1':           np.random.uniform(25, 35),
+        'Occ2':           np.random.uniform(15, 25),
+        'price_t':        np.random.uniform(2, 8),
+        'price_previous': np.random.uniform(2, 8),
         'vent_counter':   0,
-        'low_override_r1': int(T1_init <= d['temp_min_comfort_threshold']),
-        'low_override_r2': int(T2_init <= d['temp_min_comfort_threshold']),
+        'low_override_r1': 0,
+        'low_override_r2': 0,
         'current_time':   0,
     }
 
@@ -326,9 +278,9 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
 
     for iteration in range(n_iter):
         trajectories = []
+
         for _ in range(n_scenarios):
-            prices, occ1s, occ2s = _sample_training_day()
-            state = _make_initial_state(prices, occ1s, occ2s)
+            state = _sample_initial_state()
             traj  = []
 
             for t in range(T_SLOTS):
@@ -337,9 +289,8 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
                 action, _ = _solve_MILP(state, theta_next)
                 action = _apply_overrule(state, action)
 
-                occ1_next  = occ1s[t + 1]  if t + 1 < T_SLOTS else occ1s[-1]
-                occ2_next  = occ2s[t + 1]  if t + 1 < T_SLOTS else occ2s[-1]
-                price_next = prices[t + 1] if t + 1 < T_SLOTS else prices[-1]
+                occ1_next, occ2_next = next_occupancy_levels(state['Occ1'], state['Occ2'])
+                price_next = price_model(state['price_t'], state['price_previous'])
 
                 next_state, cost = _step(state, action,
                                          occ1_next, occ2_next, price_next)
@@ -365,12 +316,10 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
             theta_list[t] = np.linalg.solve(A, b)
 
         if verbose:
-            s_ref = _make_initial_state([4.0]*T_SLOTS,
-                                        [30.0]*T_SLOTS,
-                                        [20.0]*T_SLOTS)
+            s_ref = _sample_initial_state()
             V0 = theta_list[0] @ compute_features(s_ref)
             print(f"  Iteration {iteration+1}/{n_iter}  |  "
-                  f"V̂_0(s_ref) = {V0:.3f} €")
+                  f"V̂_0(ref) = {V0:.3f} €")
 
     if verbose:
         print("[ADP] Training complete.")
@@ -380,17 +329,15 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
 # Load pre-trained weights
 _WEIGHTS_NPY = os.path.join(_DIR, 'adp_weights_20.npy')
 
-if os.path.exists(_WEIGHTS_NPY):
-    _theta_matrix = np.load(_WEIGHTS_NPY)
-    assert _theta_matrix.shape == (T_SLOTS, N_FEATURES), \
-        f"Weight file shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
-    _THETA_LIST = [_theta_matrix[t] for t in range(T_SLOTS)]
-    print(f"[ADP] Loaded pre-trained weights from {_WEIGHTS_NPY}")
-else:
-    print(f"[ADP] WARNING: {_WEIGHTS_NPY} not found. Training from scratch…")
-    _THETA_LIST = train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, verbose=True)
-    np.save(_WEIGHTS_NPY, np.array(_THETA_LIST))
-    print(f"[ADP] Saved weights to {_WEIGHTS_NPY}")
+if not os.path.exists(_WEIGHTS_NPY):
+    raise FileNotFoundError(
+        f"Pre-trained weights not found at {_WEIGHTS_NPY}. "
+        "Run train_ADP() offline and save the weights before importing this policy."
+    )
+_theta_matrix = np.load(_WEIGHTS_NPY)
+assert _theta_matrix.shape == (T_SLOTS, N_FEATURES), \
+    f"Weight file shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
+_THETA_LIST = [_theta_matrix[t] for t in range(T_SLOTS)]
 
 
 # Policy entry point
