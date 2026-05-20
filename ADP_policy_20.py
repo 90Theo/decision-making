@@ -16,7 +16,7 @@ if _DIR not in sys.path:
 PARAMS   = get_fixed_data()
 T_SLOTS  = int(PARAMS['num_timeslots'])
 
-N_FEATURES     = 12
+N_FEATURES     = 14
 N_SCENARIOS    = 2000
 N_ITER         = 5
 RIDGE_ALPHA    = 1e-2
@@ -39,6 +39,8 @@ def compute_features(state):
         min(state['vent_counter'], 3) / 3.0,
         max(0.0, T_LOW - state['T1']) / 5.0,
         max(0.0, T_LOW - state['T2']) / 5.0,
+        state['low_override_r1'],
+        state['low_override_r2'],
     ], dtype=float)
 
 
