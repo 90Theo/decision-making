@@ -1,4 +1,3 @@
-
 import os
 import sys
 import numpy as np
@@ -15,6 +14,7 @@ if _DIR not in sys.path:
     sys.path.insert(0, _DIR)
 
 # Constants
+EPSILON = 0.001
 PARAMS   = get_fixed_data()
 T_SLOTS  = int(PARAMS['num_timeslots'])
 
@@ -145,7 +145,7 @@ def _solve_MILP(state, theta_next):
     lo_r1     = int(state['low_override_r1'])
     lo_r2     = int(state['low_override_r2'])
     T_out_t   = float(d['outdoor_temperature'][t])
-    T_LOW     = float(d['temp_min_comfort_threshold']) + 0.001
+    T_LOW     = float(d['temp_min_comfort_threshold'])
 
     K = N_VFA_SAMPLES
     scenarios = []
@@ -187,12 +187,12 @@ def _solve_MILP(state, theta_next):
     m.H_dyn   = pyo.Constraint(expr=m.H_next  == H_const  - hv*m.v)
 
     # Exact max(0, (T_LOW - T_next)/5) via Big-M binary formulation
-    m.z1_lb  = pyo.Constraint(expr=m.z1 >= (T_LOW - m.T1_next) / 5.0)
-    m.z1_ub1 = pyo.Constraint(expr=m.z1 <= (T_LOW - m.T1_next) / 5.0 + M_BIG * (1 - m.b1))
+    m.z1_lb  = pyo.Constraint(expr=m.z1 >= (T_LOW + EPSILON - m.T1_next) / 5.0)
+    m.z1_ub1 = pyo.Constraint(expr=m.z1 <= (T_LOW + EPSILON - m.T1_next) / 5.0 + M_BIG * (1 - m.b1))
     m.z1_ub2 = pyo.Constraint(expr=m.z1 <= M_BIG * m.b1)
 
-    m.z2_lb  = pyo.Constraint(expr=m.z2 >= (T_LOW - m.T2_next) / 5.0)
-    m.z2_ub1 = pyo.Constraint(expr=m.z2 <= (T_LOW - m.T2_next) / 5.0 + M_BIG * (1 - m.b2))
+    m.z2_lb  = pyo.Constraint(expr=m.z2 >= (T_LOW + EPSILON - m.T2_next) / 5.0)
+    m.z2_ub1 = pyo.Constraint(expr=m.z2 <= (T_LOW + EPSILON - m.T2_next) / 5.0 + M_BIG * (1 - m.b2))
     m.z2_ub2 = pyo.Constraint(expr=m.z2 <= M_BIG * m.b2)
 
     # Objective: c_t(u) + (1/K) Σ_k V̂((y_{t+1}, w_{k,t+1}); θ_{t+1})
