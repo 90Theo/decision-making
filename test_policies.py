@@ -30,7 +30,7 @@ DIR = Path(os.getcwd())
 price_file = DIR / "PriceData.csv"
 occupancy1_file = DIR / "OccupancyRoom1.csv"
 occupancy2_file = DIR / "OccupancyRoom2.csv"
-num_days = 1
+num_days = 100
 optimal = 127.20
 end_strings = []
 
