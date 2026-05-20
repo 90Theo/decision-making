@@ -10,7 +10,7 @@ params = get_fixed_data()
 
 EPSILON = 0.01
 
-def generate_scenario_tree(state, L=6, branching=3, n_samples=50):
+def generate_scenario_tree(state, L=6, branching=3, n_samples=30):
     t0 = state["current_time"]
     L = min(L, params['num_timeslots'] - t0)
     # First we make the root node
