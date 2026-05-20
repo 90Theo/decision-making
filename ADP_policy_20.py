@@ -19,9 +19,9 @@ PARAMS   = get_fixed_data()
 T_SLOTS  = int(PARAMS['num_timeslots'])
 
 N_FEATURES     = 12
-N_SCENARIOS    = 50
-N_ITER         = 20
-RIDGE_ALPHA    = 1e-2
+N_SCENARIOS    = 500
+N_ITER         = 5
+RIDGE_ALPHA    = 1
 N_VFA_SAMPLES  = 50    # K samples for averaging VFA over stochastic outcomes
 
 
@@ -145,7 +145,7 @@ def _solve_MILP(state, theta_next):
     lo_r1     = int(state['low_override_r1'])
     lo_r2     = int(state['low_override_r2'])
     T_out_t   = float(d['outdoor_temperature'][t])
-    T_LOW     = float(d['temp_min_comfort_threshold']) + 0.01
+    T_LOW     = float(d['temp_min_comfort_threshold']) + 0.001
 
     K = N_VFA_SAMPLES
     scenarios = []
@@ -326,17 +326,29 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
     return theta_list
 
 
-# Load pre-trained weights
+# Load pre-trained weights if available; otherwise train and save them.
 _WEIGHTS_NPY = os.path.join(_DIR, 'adp_weights_20.npy')
 
-if not os.path.exists(_WEIGHTS_NPY):
-    raise FileNotFoundError(
-        f"Pre-trained weights not found at {_WEIGHTS_NPY}. "
-        "Run train_ADP() offline and save the weights before importing this policy."
-    )
-_theta_matrix = np.load(_WEIGHTS_NPY)
+_theta_matrix = None
+if os.path.exists(_WEIGHTS_NPY):
+    try:
+        _theta_matrix = np.load(_WEIGHTS_NPY)
+        if _theta_matrix.shape != (T_SLOTS, N_FEATURES):
+            print(f"[ADP] Weight file shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}. Retraining.")
+            _theta_matrix = None
+    except Exception as e:
+        print(f"[ADP] Failed loading weights ({e}). Retraining.")
+        _theta_matrix = None
+
+if _theta_matrix is None:
+    print(f"[ADP] Pre-trained weights not found or invalid at {_WEIGHTS_NPY}. Training ADP now (this may take a while)...")
+    # Train using the defaults defined in this module
+    theta_list = train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA, verbose=True)
+    np.save(_WEIGHTS_NPY, np.array(theta_list))
+    _theta_matrix = np.array(theta_list)
+
 assert _theta_matrix.shape == (T_SLOTS, N_FEATURES), \
-    f"Weight file shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
+    f"Weight matrix shape mismatch after loading/training: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
 _THETA_LIST = [_theta_matrix[t] for t in range(T_SLOTS)]
 
 
