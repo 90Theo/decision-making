@@ -145,16 +145,6 @@ def _step(state, action, occ1_next, occ2_next, price_next):
     return next_state, stage_cost
 
 
-def _greedy_action(state):
-    d  = PARAMS
-    v  = 1 if state['H'] > d['humidity_threshold'] * 0.75 else 0
-    p1 = d['heating_max_power'] * 0.5
-    p2 = d['heating_max_power'] * 0.5
-    return _apply_overrule(state, {'HeatPowerRoom1': p1,
-                                   'HeatPowerRoom2': p2,
-                                   'VentilationON':  v})
-
-
 # MILP: min c_t(a) + (1/K) Σ_k θ_{t+1}ᵀ φ(s_{t+1}^k)
 def _get_solver():
     for name in ('gurobi', 'highs', 'cbc', 'glpk'):
@@ -180,13 +170,13 @@ def _solve_MILP(state, theta_next):
     T_out_t   = float(d['outdoor_temperature'][t])
     T_LOW     = float(d['temp_min_comfort_threshold']) + EPSILON_TEMP
 
-    sampled_prices = [_sample_next_price(lam, lam_prev)
-                      for _ in range(N_VFA_SAMPLES)]
-    sampled_occs   = [_sample_next_occupancy(Occ1, Occ2)
-                      for _ in range(N_VFA_SAMPLES)]
-    lam_next_exp   = float(np.mean(sampled_prices))
-    occ1_next_exp  = float(np.mean([o[0] for o in sampled_occs]))
-    occ2_next_exp  = float(np.mean([o[1] for o in sampled_occs]))
+    # Sample K stochastic outcomes w_{k,t+1} (course slide compliance)
+    K = N_VFA_SAMPLES
+    scenarios = []
+    for _ in range(K):
+        price_k = _sample_next_price(lam, lam_prev)
+        occ1_k, occ2_k = _sample_next_occupancy(Occ1, Occ2)
+        scenarios.append((price_k, occ1_k, occ2_k))
 
     a  = d['heat_exchange_coeff']
     b_ = d['thermal_loss_coeff']
@@ -205,26 +195,39 @@ def _solve_MILP(state, theta_next):
     m.p1 = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, d['heating_max_power']))
     m.p2 = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, d['heating_max_power']))
     m.v  = pyo.Var(domain=pyo.Binary)
+
+    # Physical next-state variables defined once (endogenous state is deterministic given action)
     _Z_MAX = 1.0
-    m.z1 = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
-    m.z2 = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
+    m.T1_next = pyo.Var(within=pyo.Reals)
+    m.T2_next = pyo.Var(within=pyo.Reals)
+    m.H_next  = pyo.Var(within=pyo.Reals)
+    m.z1      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
+    m.z2      = pyo.Var(domain=pyo.NonNegativeReals, bounds=(0.0, _Z_MAX))
 
-    def T1_next(m): return T1_const + g*m.p1 - c_*m.v
-    def T2_next(m): return T2_const + g*m.p2 - c_*m.v
-    def H_next(m):  return H_const  - hv*m.v
+    # Deterministic transition: y_{t+1} = f(y_t, u_t)
+    m.T1_dyn  = pyo.Constraint(expr=m.T1_next == T1_const + g*m.p1 - c_*m.v)
+    m.T2_dyn  = pyo.Constraint(expr=m.T2_next == T2_const + g*m.p2 - c_*m.v)
+    m.H_dyn   = pyo.Constraint(expr=m.H_next  == H_const  - hv*m.v)
 
-    def vfa(m):
+    m.z1_cold = pyo.Constraint(expr=m.z1 >= (T_LOW - m.T1_next) / 5.0)
+    m.z2_cold = pyo.Constraint(expr=m.z2 >= (T_LOW - m.T2_next) / 5.0)
+
+    # Objective: c_t(u) + (1/K) Σ_k V̂((y_{t+1}, w_{k,t+1}); θ_{t+1})
+    m.Scenarios = pyo.RangeSet(0, K - 1)
+
+    def vfa_scenario(m, k):
         th = theta_next
         t_next = t + 1
+        price_k, occ1_k, occ2_k = scenarios[k]
         return (
             th[0]  * 1.0
-          + th[1]  * T1_next(m)            / 25.0
-          + th[2]  * T2_next(m)            / 25.0
-          + th[3]  * H_next(m)             / 50.0
-          + th[4]  * lam_next_exp          / 6.0
+          + th[1]  * m.T1_next             / 25.0
+          + th[2]  * m.T2_next             / 25.0
+          + th[3]  * m.H_next              / 50.0
+          + th[4]  * price_k               / 6.0
           + th[5]  * lam                   / 6.0
-          + th[6]  * occ1_next_exp         / 35.0
-          + th[7]  * occ2_next_exp         / 35.0
+          + th[6]  * occ1_k                / 35.0
+          + th[7]  * occ2_k                / 35.0
           + th[8]  * t_next                / float(T_SLOTS)
           + th[9]  * (vc_next_coef * m.v)  / 3.0
           + th[10] * m.z1
@@ -232,14 +235,10 @@ def _solve_MILP(state, theta_next):
         )
 
     m.obj = pyo.Objective(
-        expr = lam * (m.p1 + m.p2 + d['ventilation_power'] * m.v) + vfa(m),
+        expr = lam * (m.p1 + m.p2 + d['ventilation_power'] * m.v)
+             + sum(vfa_scenario(m, k) for k in m.Scenarios) / K,
         sense = pyo.minimize
     )
-
-    m.z1_nonneg = pyo.Constraint(expr = m.z1 >= 0.0)
-    m.z1_cold   = pyo.Constraint(expr = m.z1 >= (T_LOW - T1_next(m)) / 5.0)
-    m.z2_nonneg = pyo.Constraint(expr = m.z2 >= 0.0)
-    m.z2_cold   = pyo.Constraint(expr = m.z2 >= (T_LOW - T2_next(m)) / 5.0)
 
     if 0 < vc < d['vent_min_up_time']:
         m.vent_inertia = pyo.Constraint(expr = m.v == 1)
@@ -325,13 +324,10 @@ def train_ADP(n_scenarios=N_SCENARIOS, n_iter=N_ITER, ridge=RIDGE_ALPHA,
             traj  = []
 
             for t in range(T_SLOTS):
-                if iteration == 0:
-                    action = _greedy_action(state)
-                else:
-                    theta_next = theta_list[t + 1] if t + 1 < T_SLOTS \
-                                 else np.zeros(N_FEATURES)
-                    action, _ = _solve_MILP(state, theta_next)
-                    action = _apply_overrule(state, action)
+                theta_next = theta_list[t + 1] if t + 1 < T_SLOTS \
+                             else np.zeros(N_FEATURES)
+                action, _ = _solve_MILP(state, theta_next)
+                action = _apply_overrule(state, action)
 
                 occ1_next  = occ1s[t + 1]  if t + 1 < T_SLOTS else occ1s[-1]
                 occ2_next  = occ2s[t + 1]  if t + 1 < T_SLOTS else occ2s[-1]
@@ -379,7 +375,7 @@ _WEIGHTS_NPY = os.path.join(_DIR, 'adp_weights_20.npy')
 if os.path.exists(_WEIGHTS_NPY):
     _theta_matrix = np.load(_WEIGHTS_NPY)
     assert _theta_matrix.shape == (T_SLOTS, N_FEATURES), \
-        f"Weight NPY shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
+        f"Weight file shape mismatch: expected ({T_SLOTS},{N_FEATURES}), got {_theta_matrix.shape}"
     _THETA_LIST = [_theta_matrix[t] for t in range(T_SLOTS)]
     print(f"[ADP] Loaded pre-trained weights from {_WEIGHTS_NPY}")
 else:
